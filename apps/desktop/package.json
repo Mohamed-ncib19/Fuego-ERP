@@ -1,0 +1,22 @@
+{
+  "name": "@fuego/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsc -p tsconfig.json && electron .",
+    "start": "electron .",
+    "rebuild:sqlite": "electron-rebuild -f -w better-sqlite3"
+  },
+  "dependencies": {
+    "@fuego/backend": "workspace:*"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@types/node": "^24.0.0",
+    "electron": "^45.3.1",
+    "typescript": "^5.8.3"
+  }
+}
