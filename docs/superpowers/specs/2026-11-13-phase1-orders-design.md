@@ -27,7 +27,13 @@ livraison. Every screen label and API error message is French.
   (+ `cancelled`) with an append-only timeline (who, when, note).
 - Auto ticket number `CMD-2026-0001` style, printable anytime, reprintable.
 - Order list with search (ticket no, client, phone) and filters (status, type,
-  date range), paginated.
+  date range), paginated — in **two views**: a dense table and a kanban board
+  by status, plus quick saved views (Aujourd'hui, En retard, À livrer) and
+  one-click status advance from the list.
+- **Draft-friendly creation**: a "Nouvelle commande" button lives in the navbar
+  (always reachable, also Ctrl+N) and the form can be saved with partial info —
+  even only a note — to be finished later; incomplete orders are flagged until
+  articles are added.
 - Roles: `staff` and `super_admin` both run orders/payments; force-delivering an
   unpaid order is `super_admin` only.
 
@@ -65,7 +71,9 @@ livraison. Every screen label and API error message is French.
 - *B. Full event sourcing* (state derived from replaying events): rejected —
   meaningful complexity, zero benefit at this scale, harder list queries.
 - *C. Payments as editable rows*: rejected — payments are immutable ledger
-  events; corrections happen by adding compensating rows (`refund`).
+  events; corrections happen by adding compensating rows (`refund`), including
+  full refunds of delivered/cancelled orders via a "Rembourser la totalité"
+  quick action.
 
 **Delivery fee handling** (owner decision, 13 Nov 2026): dedicated
 `delivery_fee` field added on top of the article total (not a pseudo-article),
@@ -152,7 +160,7 @@ Indexes: unique `ticket_no`; `status`, `created_at`, `customer_name` for list fi
 
 | Action | From | To | Guards |
 |---|---|---|---|
-| confirm | pending | confirmed | one transaction: optional advance payment row (amount ≥ 0; 0 = no payment row) + event + status |
+| confirm | pending | confirmed | one transaction: optional advance payment row (amount ≥ 0; 0 = no payment row) + event + status. **Requires ≥ 1 article** (`total_amount > 0`) — a note-only draft stays pending; French error: "Ajoutez au moins un article avant de confirmer" |
 | start | confirmed | in_progress | staff+ |
 | ready | in_progress | ready | staff+ |
 | deliver | ready | delivered | `reste <= 0` (overpaid = credit, deliverable), **or** `super_admin` passes `force: true` + note → event payload `{forced: true}`; the debt stays visible |
@@ -198,7 +206,7 @@ restarts each year.
 
 | Method & path | Body | Notes |
 |---|---|---|
-| `POST /orders` | `{customer_name, customer_phone?, description?, order_type, delivery_address?, delivery_fee?, due_date?, items: [{label, quantity, unit_price}]}` | creates `pending` order + `created` event; returns full order |
+| `POST /orders` | `{customer_name?, customer_phone?, description?, order_type? (default local), delivery_address?, delivery_fee?, due_date?, items?: [{label, quantity, unit_price}]}` | **partial creation allowed** (owner decision 13 Nov 2026): every field optional, but at least one of customer_name/description/items must be present; creates `pending` order + `created` event; returns full order |
 | `GET /orders` | query: `status?, order_type?, search?, from?, to?, limit?, page?` | `from`/`to` filter on **created_at** ("what came in today"); search matches ticket_no / customer_name / phone; meta: `{page, limit, total, totalPages}` (names follow the existing `PageMeta` convention) |
 | `GET /orders/:id` | — | order + items + payments + events + computed `paid`, `reste` |
 | `PATCH /orders/:id` | any editable subset incl. `items` | rules per 5.3 |
@@ -210,14 +218,26 @@ restarts each year.
 Ticket data is served by `GET /orders/:id` (renderer composes the print view).
 
 Validation (DTO + Zod shared schemas): `online` ⇒ `delivery_address` required;
-`local` ⇒ `delivery_fee` absent/0; ≥ 1 item; `quantity ≥ 1`; amounts ≥ 0,
-integers in millimes; French field errors.
+`local` ⇒ `delivery_fee` absent/0; at least one of customer_name/description/
+items on create; `quantity ≥ 1`; amounts ≥ 0, integers in millimes; French
+field errors.
+
+Ticket printing is available from `confirmed` onward — a draft (no articles)
+cannot be printed; the button is disabled with a tooltip.
 
 ## 7. Renderer screens (French, existing design tokens)
 
-- **`/commandes` (list)** — table: ticket_no, client, type badge (Local/En ligne), total, reste, statut badge, due date; search box; status/type filters; date range; pagination; "Nouvelle commande" button. Replaces the Phase 0 placeholder.
+- **`/commandes` (list)** — two view modes, **Tableau** (default: ticket_no,
+  client, type badge, total, reste, statut badge, due date) and **Kanban**
+  (columns En attente / Confirmée / En cours / Prête, cards with client, total,
+  reste, due date; one-click "advance status" button on each card — drag-and-drop
+  is explicitly deferred). Quick saved views: **Aujourd'hui**, **En retard**
+  (due date passed, not delivered), **À livrer** (online). Search box; status/type
+  filters; date range; pagination; pending orders without articles carry an
+  **« Incomplète »** badge. "Nouvelle commande" button here and in the navbar
+  (global, Ctrl+N shortcut). Replaces the Phase 0 placeholder.
 - **New/Edit order** — one form: client, type toggle (local/online), article rows with add/remove + live totals footer, delivery fields when online, due date, description; footer actions: **Enregistrer** (pending) and **Confirmer** (opens advance field, atomic confirm). Zod schema shared with backend.
-- **`/commandes/:id` (detail)** — header (ticket_no, statut badge, client, reste à payer highlight), state action buttons, "Enregistrer un paiement" modal (kind/amount/note), articles table, payments list, timeline, "Imprimer le ticket".
+- **`/commandes/:id` (detail)** — header (ticket_no, statut badge, client, reste à payer highlight), state action buttons, "Enregistrer un paiement" modal (kind/amount/note) with a **"Rembourser la totalité"** shortcut pre-filling the full paid amount as a refund, articles table, payments list, timeline, "Imprimer le ticket" (disabled before confirmation).
 - **`/commandes/:id/ticket`** — print-only **A4 layout** (owner decision: office
   printer paper): business name from settings, ticket_no, client, article lines,
   livraison, TOTAL / Avance / RESTE, statut + due date, footer from
