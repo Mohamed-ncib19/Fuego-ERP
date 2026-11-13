@@ -103,6 +103,13 @@ async function createWindow() {
   }
 }
 
+// One app instance at a time — a second launch would otherwise boot a second
+// backend on another port that opens the same SQLite file. The first instance
+// wins; the duplicate launch simply brings the existing window forward.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+
 app.whenReady().then(async () => {
   // Boot diagnostics go to a file — stdout pipes die with the parent shell,
   // and an Electron crash here would otherwise be invisible.
@@ -118,6 +125,14 @@ app.whenReady().then(async () => {
 
   const secrets = loadOrCreateSecrets();
   dbg("secrets ready");
+
+  app.on("second-instance", () => {
+    // Someone launched the app again — focus the existing window instead.
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
   const port = await pickPort(3220);
   process.env.FUEGO_PORT = String(port);
   dbg("port picked", port);

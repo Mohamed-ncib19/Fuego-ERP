@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff, Flame } from "lucide-react";
-import { authApi, settingsApi } from "@/lib/api/auth.api";
+import { authApi, settingsApi, setupApi } from "@/lib/api/auth.api";
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { Button, Input, Label, FieldError } from "@/components/ui";
 
@@ -34,6 +34,17 @@ export default function LoginPage() {
     retry: false,
   });
   const businessName = settings?.business_name?.trim() || "Fuego";
+
+  // No user exists yet → the login form can never succeed; send the visitor
+  // to the first-run wizard instead (fresh-install bug fix).
+  const { data: setupStatus } = useQuery({
+    queryKey: ["setup-status"],
+    queryFn: () => setupApi.status(),
+    retry: false,
+  });
+  useEffect(() => {
+    if (setupStatus?.needs_setup) navigate("/setup", { replace: true });
+  }, [setupStatus, navigate]);
 
   const { register, handleSubmit, formState } = useForm<{
     email: string;
