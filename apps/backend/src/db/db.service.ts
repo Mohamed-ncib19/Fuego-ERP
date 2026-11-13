@@ -41,8 +41,10 @@ export class DbService {
 }
 
 /** Creates every table if missing — the lightweight "push" at boot so a
- * fresh install or a DB path change never starts broken. Schema changes
- * beyond Phase 0 go through drizzle-kit push (dev) / migrations (prod). */
+ * fresh install or a DB path change never starts broken. This is the shipped
+ * desktop app's only schema source (there is no migration runner);
+ * schema.ts must mirror it for typed queries, and drizzle-kit push stays a
+ * dev convenience. */
 export function ensureTables(sqlite: Database.Database) {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS users (
@@ -90,5 +92,62 @@ export function ensureTables(sqlite: Database.Database) {
       name TEXT PRIMARY KEY NOT NULL,
       value INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY NOT NULL,
+      ticket_no TEXT NOT NULL,
+      ticket_year INTEGER NOT NULL,
+      ticket_seq INTEGER NOT NULL,
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT,
+      description TEXT,
+      order_type TEXT NOT NULL,
+      delivery_address TEXT,
+      delivery_fee INTEGER NOT NULL DEFAULT 0,
+      total_amount INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      due_date TEXT,
+      created_by TEXT NOT NULL,
+      confirmed_by TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS orders_ticket_no_key ON orders (ticket_no);
+    CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status);
+    CREATE INDEX IF NOT EXISTS orders_created_at_idx ON orders (created_at);
+    CREATE INDEX IF NOT EXISTS orders_customer_name_idx ON orders (customer_name);
+
+    CREATE TABLE IF NOT EXISTS order_items (
+      id TEXT PRIMARY KEY NOT NULL,
+      order_id TEXT NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      label TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      unit_price INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS order_items_order_id_idx ON order_items (order_id);
+
+    CREATE TABLE IF NOT EXISTS order_events (
+      id TEXT PRIMARY KEY NOT NULL,
+      order_id TEXT NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      payload TEXT,
+      actor_id TEXT NOT NULL,
+      actor_label TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS order_events_order_id_idx ON order_events (order_id);
+
+    CREATE TABLE IF NOT EXISTS payments (
+      id TEXT PRIMARY KEY NOT NULL,
+      order_id TEXT NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      note TEXT,
+      recorded_by TEXT NOT NULL,
+      recorded_by_label TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS payments_order_id_idx ON payments (order_id);
   `);
 }

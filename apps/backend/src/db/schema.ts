@@ -13,8 +13,9 @@ import {
  * tables, uuid text PKs generated in code (SQLite has no uuid default),
  * integer timestamps in epoch-ms mode, and immutable money/event rows.
  *
- * Phase 0 ships users, audit_logs, settings and counters. Orders, payments
- * and expenses arrive in Phase 1/2 as additive-only changes.
+ * Phase 0 ships users, audit_logs, settings and counters. Phase 1 adds
+ * orders, order_items, order_events and payments; expenses arrive in Phase 2
+ * as additive-only changes.
  */
 
 /** Epoch-ms timestamps with app-side defaults (SQLite has no CURRENT_TIMESTAMP on integers). */
@@ -92,3 +93,100 @@ export const counters = sqliteTable("counters", {
   name: text("name").primaryKey().notNull(),
   value: integer("value").notNull().default(0),
 });
+
+export const orders = sqliteTable(
+  "orders",
+  {
+    id: text("id").primaryKey().notNull(),
+    /** Human ticket number, unique; the year-scoped sequence lives in `counters`. */
+    ticket_no: text("ticket_no").notNull(),
+    ticket_year: integer("ticket_year").notNull(),
+    ticket_seq: integer("ticket_seq").notNull(),
+    /** Empty string when the draft was saved before the customer was known. */
+    customer_name: text("customer_name").notNull(),
+    customer_phone: text("customer_phone"),
+    description: text("description"),
+    /** OrderType: "local" | "online" — constrained in code, not by SQLite. */
+    order_type: text("order_type").notNull(),
+    /** Required iff `order_type = "online"` (service rule). */
+    delivery_address: text("delivery_address"),
+    /** Integer millimes, kept separate from articles; 0 when local. */
+    delivery_fee: integer("delivery_fee").notNull().default(0),
+    /** Σ(quantity × unit_price) in millimes, maintained in code. */
+    total_amount: integer("total_amount").notNull(),
+    /** OrderStatus: constrained in code, not by SQLite. */
+    status: text("status").notNull().default("pending"),
+    /** `YYYY-MM-DD` promise date. */
+    due_date: text("due_date"),
+    created_by: text("created_by").notNull(),
+    /** Set once, when the order leaves `pending`. */
+    confirmed_by: text("confirmed_by"),
+    created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+    updated_at: tsMs("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("orders_ticket_no_key").on(table.ticket_no),
+    index("orders_status_idx").on(table.status),
+    index("orders_created_at_idx").on(table.created_at),
+    index("orders_customer_name_idx").on(table.customer_name),
+  ],
+);
+
+export const orderItems = sqliteTable(
+  "order_items",
+  {
+    id: text("id").primaryKey().notNull(),
+    order_id: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** Display order, zero-based; reindexed whenever items are replaced. */
+    position: integer("position").notNull(),
+    label: text("label").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+    /** Integer millimes, ≥ 0. */
+    unit_price: integer("unit_price").notNull(),
+  },
+  (table) => [index("order_items_order_id_idx").on(table.order_id)],
+);
+
+export const orderEvents = sqliteTable(
+  "order_events",
+  {
+    id: text("id").primaryKey().notNull(),
+    order_id: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** OrderEventType — append-only; constrained in code, not by SQLite. */
+    type: text("type").notNull(),
+    /** JSON text: `{before, after}` diffs, notes, `{forced: true}` metadata. */
+    payload: text("payload"),
+    actor_id: text("actor_id").notNull(),
+    actor_label: text("actor_label").notNull(),
+    created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+  },
+  (table) => [index("order_events_order_id_idx").on(table.order_id)],
+);
+
+/** Immutable money ledger: corrections happen by adding refund rows. */
+export const payments = sqliteTable(
+  "payments",
+  {
+    id: text("id").primaryKey().notNull(),
+    order_id: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    /** PaymentKind: "advance" | "balance" | "refund" — refund subtracts. */
+    kind: text("kind").notNull(),
+    /** Integer millimes, always ≥ 1. */
+    amount: integer("amount").notNull(),
+    /** e.g. "espèces", "chèque #123". */
+    note: text("note"),
+    recorded_by: text("recorded_by").notNull(),
+    recorded_by_label: text("recorded_by_label").notNull(),
+    created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+  },
+  (table) => [index("payments_order_id_idx").on(table.order_id)],
+);

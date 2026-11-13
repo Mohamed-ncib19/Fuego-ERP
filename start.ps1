@@ -1,3 +1,3 @@
-cd D:\fuego
-Set-Location D:\fuego
-pnpm install --ignore-scripts 2>&1 | tail -5
+Set-Location $PSScriptRoot
+pnpm install --ignore-scripts
+node .\scripts\dev.mjs

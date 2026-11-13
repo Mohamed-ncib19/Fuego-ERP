@@ -22,10 +22,17 @@ mkdirSync(logsDir, { recursive: true });
 const isWin = process.platform === "win32";
 const baseEnv = { ...process.env, FORCE_COLOR: "1" };
 
+const children = [];
+
 function run(name, color, label, args, cwd, env = {}) {
   const logPath = path.join(logsDir, `${name}.log`);
   const pnpm = isWin ? "pnpm.cmd" : "pnpm";
-  const child = spawn(pnpm, args, { cwd: path.join(root, cwd), env: { ...baseEnv, ...env } });
+  const child = spawn(pnpm, args, {
+    cwd: path.join(root, cwd),
+    env: { ...baseEnv, ...env },
+    shell: isWin,
+  });
+  children.push(child);
 
   const write = (chunk) => {
     const text = chunk.toString();
@@ -91,4 +98,25 @@ waitOnTcp(5173)
     process.stdout.write(`\x1b[31m[dev]\x1b[0m ${err.message}\n`);
   });
 
-process.on("SIGINT", () => process.exit(0));
+function cleanup() {
+  for (const c of children) {
+    if (c.pid) {
+      try {
+        if (isWin) {
+          spawn("taskkill", ["/pid", String(c.pid), "/f", "/t"]);
+        } else {
+          c.kill();
+        }
+      } catch {}
+    }
+  }
+}
+
+process.on("SIGINT", () => {
+  cleanup();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  cleanup();
+  process.exit(0);
+});

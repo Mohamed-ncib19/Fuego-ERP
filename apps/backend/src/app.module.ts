@@ -7,6 +7,7 @@ import { UsersModule } from "./users/users.module";
 import { SetupModule } from "./setup/setup.module";
 import { SettingsModule } from "./settings/settings.module";
 import { HealthController } from "./health/health.controller";
+import { OrdersModule } from "./orders/orders.module";
 import { ApiKeyGuard } from "./common/guards/api-key.guard";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
@@ -19,6 +20,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
     UsersModule,
     SetupModule,
     SettingsModule,
+    OrdersModule,
   ],
   controllers: [HealthController],
   // Guard order = registration order: API key first (blocks non-app callers),

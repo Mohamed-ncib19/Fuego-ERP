@@ -1,4 +1,4 @@
 @echo off
-cd D:\fuego
-call npm install --ignore-scripts
-call .\scripts\dev.mjs
+cd /d "%~dp0"
+call pnpm install --ignore-scripts
+call node .\scripts\dev.mjs

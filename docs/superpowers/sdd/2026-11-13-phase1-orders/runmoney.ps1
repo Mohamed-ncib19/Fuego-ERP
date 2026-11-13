@@ -1,0 +1,1 @@
+& 'D:\fuego\.worktrees\phase-1-commandes\apps\backend\node_modules\.vitest\bin\vitest.mjs' run 'D:\fuego\.worktrees\phase-1-commandes\apps\backend\src\orders\orders.money.spec.ts'
