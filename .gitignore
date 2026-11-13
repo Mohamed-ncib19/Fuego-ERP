@@ -26,3 +26,6 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+
+# SDD worktrees
+.worktrees/
