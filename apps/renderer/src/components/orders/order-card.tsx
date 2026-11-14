@@ -3,7 +3,7 @@ import { Calendar, User, Phone, Check, Play, CheckCircle2, Truck, AlertCircle } 
 import { formatMillimes, formatDate } from "@/lib/format";
 import { Badge, Button } from "@/components/ui";
 import { TypeBadge } from "./type-badge";
-import type { OrderSummary } from "@fuego/shared";
+import { formatPhone, type OrderSummary } from "@fuego/shared";
 
 interface OrderCardProps {
   order: OrderSummary;
@@ -51,7 +51,7 @@ export function OrderCard({ order, onAdvance, advanceLoading = false }: OrderCar
         {order.customer_phone && (
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-text-secondary">
             <Phone className="h-3 w-3" />
-            <span>{order.customer_phone}</span>
+            <span>{formatPhone(order.customer_phone)}</span>
           </p>
         )}
       </div>

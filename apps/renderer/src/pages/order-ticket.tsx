@@ -6,7 +6,7 @@ import { Button, PageLoader } from "@/components/ui";
 import { ordersApi } from "@/lib/api/orders.api";
 import { settingsApi } from "@/lib/api/auth.api";
 import { formatMillimes, formatDate, formatDateTime } from "@/lib/format";
-import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from "@fuego/shared";
+import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, formatPhone } from "@fuego/shared";
 
 export default function OrderTicketPage() {
   const { id } = useParams<{ id: string }>();
@@ -56,7 +56,7 @@ export default function OrderTicketPage() {
       </div>
 
       {/* Printable A4 Paper Sheet */}
-      <div className="mx-auto w-full max-w-[210mm] border border-border bg-white p-8 text-neutral-900 shadow-card print:border-none print:p-0 print:shadow-none">
+      <div className="mx-auto w-full max-w-[210mm] border border-neutral-300 bg-white p-8 text-neutral-900 shadow-card print:border-none print:p-0 print:shadow-none">
         {/* Ticket Header */}
         <div className="flex items-start justify-between border-b-2 border-neutral-900 pb-5">
           <div className="flex items-center gap-3">
@@ -91,7 +91,7 @@ export default function OrderTicketPage() {
               {order.customer_name || "Client comptoir"}
             </p>
             {order.customer_phone && (
-              <p className="text-neutral-700">Tél: {order.customer_phone}</p>
+              <p className="text-neutral-700">Tél: {formatPhone(order.customer_phone)}</p>
             )}
             {order.description && (
               <p className="mt-1 italic text-neutral-600">"{order.description}"</p>

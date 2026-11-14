@@ -3,7 +3,6 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { useToastStore, ToastViewport } from "@/hooks/use-toast";
-import { setApiKey } from "@/lib/api/client";
 import { PageLoader } from "@/components/ui";
 import LoginPage from "@/pages/login";
 import SetupPage from "@/pages/setup";
@@ -166,15 +165,6 @@ function AppRoutes() {
 }
 
 export default function App() {
-  useEffect(() => {
-    const bridge = (window as any).fuego;
-    if (bridge?.getLaunchInfo) {
-      bridge.getLaunchInfo().then((info: any) => {
-        if (info?.api_key) setApiKey(info.api_key);
-      });
-    }
-  }, []);
-
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>

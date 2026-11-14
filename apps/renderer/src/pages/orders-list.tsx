@@ -19,7 +19,7 @@ import { OrderCard } from "@/components/orders/order-card";
 import { ordersApi, type ListOrdersParams } from "@/lib/api/orders.api";
 import { formatMillimes, formatDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
-import type { OrderStatus, OrderSummary } from "@fuego/shared";
+import { formatPhone, type OrderStatus, type OrderSummary } from "@fuego/shared";
 
 type QuickView = "all" | "today" | "overdue" | "to_deliver";
 
@@ -142,7 +142,7 @@ export default function OrdersListPage() {
             <button
               onClick={() => { setQuickView("all"); setPage(1); }}
               className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "all" ? "bg-primary text-white" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
+                quickView === "all" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
               }`}
             >
               Toutes
@@ -150,7 +150,7 @@ export default function OrdersListPage() {
             <button
               onClick={() => { setQuickView("today"); setPage(1); }}
               className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "today" ? "bg-primary text-white" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
+                quickView === "today" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
               }`}
             >
               Aujourd'hui
@@ -158,7 +158,7 @@ export default function OrdersListPage() {
             <button
               onClick={() => { setQuickView("overdue"); setPage(1); }}
               className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "overdue" ? "bg-primary text-white" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
+                quickView === "overdue" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
               }`}
             >
               En retard
@@ -166,7 +166,7 @@ export default function OrdersListPage() {
             <button
               onClick={() => { setQuickView("to_deliver"); setPage(1); }}
               className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "to_deliver" ? "bg-primary text-white" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
+                quickView === "to_deliver" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
               }`}
             >
               À livrer (En ligne)
@@ -194,15 +194,6 @@ export default function OrdersListPage() {
                 <LayoutGrid className="h-4 w-4" />
               </button>
             </div>
-
-            <Button
-              variant="primary"
-              className="px-3 py-1.5 text-xs"
-              onClick={() => navigate("/commandes/new")}
-            >
-              <Plus className="h-4 w-4" />
-              <span>Créer</span>
-            </Button>
           </div>
         </div>
 
@@ -290,7 +281,7 @@ export default function OrdersListPage() {
                             onClick={() => navigate(`/commandes/${order.id}`)}
                             className="cursor-pointer transition-colors hover:bg-surface-2"
                           >
-                            <td className="px-4 py-3 font-mono font-medium text-primary">
+                            <td className="whitespace-nowrap px-4 py-3 font-mono font-medium text-primary">
                               {order.ticket_no}
                             </td>
                             <td className="px-4 py-3 text-xs text-text-secondary">
@@ -311,7 +302,7 @@ export default function OrdersListPage() {
                                 )}
                               </div>
                               {order.customer_phone && (
-                                <p className="text-xs text-text-secondary">{order.customer_phone}</p>
+                                <p className="text-xs text-text-secondary">{formatPhone(order.customer_phone)}</p>
                               )}
                             </td>
                             <td className="px-4 py-3">

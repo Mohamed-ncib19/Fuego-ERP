@@ -79,12 +79,12 @@ export default function SetupPage() {
   if (setupStatus && !setupStatus.needs_setup) return null;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary-500 via-primary-700 to-primary-950 p-4">
+    <div className="flex min-h-screen items-center justify-center bg-surface-2 bg-[radial-gradient(ellipse_at_top,rgb(var(--color-primary-500)/0.14),transparent_60%)] p-4">
       <div className="w-full max-w-md">
         <div className="rounded-modal border border-border bg-surface p-8 shadow-hover">
           <div className="mb-6 flex flex-col items-center">
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-card bg-primary shadow-md">
-              <Flame className="h-7 w-7 text-white" />
+              <Flame className="h-7 w-7 text-neutral-950" />
             </div>
             <h1 className="text-h2 font-bold text-text-primary">Bienvenue sur Fuego</h1>
             <p className="text-center text-sm text-text-secondary">

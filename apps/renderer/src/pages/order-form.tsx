@@ -20,12 +20,13 @@ import {
   Card,
   Label,
   FieldError,
+  PhoneInput,
   PageLoader,
 } from "@/components/ui";
 import { ordersApi, type CreateOrderItemInput } from "@/lib/api/orders.api";
 import { formatMillimes } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
-import type { OrderType } from "@fuego/shared";
+import { isValidPhone, normalizePhone, type OrderType } from "@fuego/shared";
 
 interface FormItem {
   id: string;
@@ -55,6 +56,8 @@ export default function OrderFormPage() {
   const [confirmAdvanceDt, setConfirmAdvanceDt] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Optional field — but once started it must be a complete 8-digit number.
+  const phoneIncomplete = customerPhone.length > 0 && !isValidPhone(customerPhone);
 
   // Load existing order for edit
   const { data: existingOrder, isLoading } = useQuery({
@@ -66,7 +69,7 @@ export default function OrderFormPage() {
   useEffect(() => {
     if (existingOrder) {
       setCustomerName(existingOrder.customer_name || "");
-      setCustomerPhone(existingOrder.customer_phone || "");
+      setCustomerPhone(normalizePhone(existingOrder.customer_phone));
       setDescription(existingOrder.description || "");
       setOrderType(existingOrder.order_type);
       setDeliveryAddress(existingOrder.delivery_address || "");
@@ -138,13 +141,17 @@ export default function OrderFormPage() {
         throw new Error("Renseignez au moins un client, une description ou un article");
       }
 
+      if (phoneIncomplete) {
+        throw new Error("Le téléphone doit contenir 8 chiffres (+216 xx xxx xxx)");
+      }
+
       if (orderType === "online" && !deliveryAddress.trim()) {
         throw new Error("L'adresse de livraison est obligatoire pour une commande en ligne");
       }
 
       const payload = {
         customer_name: customerName.trim() || undefined,
-        customer_phone: customerPhone.trim() || undefined,
+        customer_phone: customerPhone || undefined,
         description: description.trim() || undefined,
         order_type: orderType,
         delivery_address: orderType === "online" ? deliveryAddress.trim() || undefined : undefined,
@@ -252,11 +259,12 @@ export default function OrderFormPage() {
               </div>
               <div>
                 <Label>Téléphone</Label>
-                <Input
-                  placeholder="Ex: 22 123 456"
+                <PhoneInput
                   value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  onChange={setCustomerPhone}
+                  invalid={phoneIncomplete}
                 />
+                {phoneIncomplete && <FieldError message="8 chiffres attendus : xx xxx xxx" />}
               </div>
             </div>
 

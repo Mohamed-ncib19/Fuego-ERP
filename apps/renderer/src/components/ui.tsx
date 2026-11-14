@@ -4,8 +4,11 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
   useEffect,
+  useRef,
+  useState,
 } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, MoreHorizontal, X } from "lucide-react";
+import { PHONE_PREFIX, formatPhoneLocal, normalizePhone } from "@fuego/shared";
 
 /* ---------------------------------------------------------------------------
  * Minimal, token-driven UI kit — same philosophy as the reference ui/
@@ -15,10 +18,11 @@ import { Loader2, X } from "lucide-react";
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 
 const buttonStyles: Record<ButtonVariant, string> = {
-  primary: "bg-primary text-white hover:bg-primary-600 disabled:opacity-60",
+  primary:
+    "bg-primary text-neutral-950 font-semibold hover:bg-primary-400 disabled:opacity-50",
   secondary:
     "bg-surface text-text-primary border border-border hover:bg-surface-2 disabled:opacity-60",
-  danger: "bg-danger text-white hover:opacity-90 disabled:opacity-60",
+  danger: "bg-danger/15 text-danger border border-danger/40 hover:bg-danger/25 disabled:opacity-60",
   ghost: "text-text-secondary hover:bg-surface-2 hover:text-text-primary",
 };
 
@@ -114,7 +118,7 @@ export function Badge({
   };
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${tones[tone]}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium ${tones[tone]}`}
     >
       {children}
     </span>
@@ -176,7 +180,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       <div
         className={`relative z-10 w-full ${width} rounded-modal border border-border bg-surface p-6 shadow-hover`}
       >
@@ -227,5 +231,122 @@ export function ConfirmDialog({
         </Button>
       </div>
     </Modal>
+  );
+}
+
+export interface MoreMenuItem {
+  label: string;
+  icon?: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Shown under the label — typically why the item is disabled. */
+  hint?: string;
+}
+
+/**
+ * Secondary actions tucked behind one "Plus" button, so a screen keeps a
+ * single obvious main action. Closes on outside click and on Escape.
+ */
+export function MoreMenu({ items, label = "Plus" }: { items: MoreMenuItem[]; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (items.length === 0) return null;
+  return (
+    <div ref={ref} className="relative">
+      <Button
+        variant="secondary"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+        <span>{label}</span>
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-40 mt-2 w-64 overflow-hidden rounded-card border border-border bg-surface py-1 shadow-hover"
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              role="menuitem"
+              disabled={item.disabled}
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+              className={`flex w-full items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                item.danger
+                  ? "text-danger hover:bg-danger/10"
+                  : "text-text-primary hover:bg-surface-2"
+              }`}
+            >
+              {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
+              <span className="min-w-0">
+                <span className="block">{item.label}</span>
+                {item.hint && (
+                  <span className="block text-xs text-text-secondary">{item.hint}</span>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Tunisian phone field: the +216 prefix is fixed, the user types the 8
+ * national digits and sees them grouped "xx xxx xxx". `value` / `onChange`
+ * carry the bare digits ("22123456").
+ */
+export function PhoneInput({
+  value,
+  onChange,
+  invalid = false,
+}: {
+  value: string;
+  onChange: (digits: string) => void;
+  invalid?: boolean;
+}) {
+  return (
+    <div
+      className={`flex w-full items-center rounded-btn border bg-surface text-sm focus-within:ring-2 focus-within:ring-primary/30 ${
+        invalid ? "border-danger" : "border-border"
+      }`}
+    >
+      <span className="select-none border-r border-border px-3 py-2 font-medium text-primary">
+        {PHONE_PREFIX}
+      </span>
+      <input
+        type="tel"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="22 123 456"
+        value={formatPhoneLocal(value)}
+        onChange={(e) => onChange(normalizePhone(e.target.value))}
+        className="w-full bg-transparent px-3 py-2 tracking-wide text-text-primary placeholder:text-text-secondary/60 focus:outline-none"
+      />
+    </div>
   );
 }

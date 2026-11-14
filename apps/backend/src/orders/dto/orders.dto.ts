@@ -4,12 +4,14 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
   MinLength,
   ValidateNested,
 } from "class-validator";
-import { Type } from "class-transformer";
+import { Transform, Type } from "class-transformer";
+import { normalizePhone } from "@fuego/shared";
 import {
   ORDER_TYPE_LABELS,
   PAYMENT_KINDS,
@@ -38,9 +40,11 @@ export class CreateOrderDto {
   @MaxLength(120)
   customer_name?: string;
 
-  @IsString()
+  @Transform(({ value }) =>
+    typeof value === "string" ? normalizePhone(value) || undefined : value,
+  )
   @IsOptional()
-  @MaxLength(30)
+  @Matches(/^[0-9]{8}$/, { message: "Le téléphone doit contenir 8 chiffres (+216 xx xxx xxx)" })
   customer_phone?: string;
 
   @IsString()
@@ -80,9 +84,11 @@ export class UpdateOrderDto {
   @MaxLength(120)
   customer_name?: string;
 
-  @IsString()
+  @Transform(({ value }) =>
+    typeof value === "string" ? normalizePhone(value) || undefined : value,
+  )
   @IsOptional()
-  @MaxLength(30)
+  @Matches(/^[0-9]{8}$/, { message: "Le téléphone doit contenir 8 chiffres (+216 xx xxx xxx)" })
   customer_phone?: string;
 
   @IsString()

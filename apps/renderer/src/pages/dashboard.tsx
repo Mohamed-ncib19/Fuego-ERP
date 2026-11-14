@@ -56,41 +56,6 @@ export default function DashboardPage() {
       subtitle={settings?.business_name ? `${settings.business_name} — Vue d'ensemble de l'activité` : "Vue d'ensemble de l'activité"}
     >
       <div className="space-y-6">
-        {/* Quick Actions Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-3 shadow-sm">
-          <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <span className="font-semibold text-text-primary">Accès rapide :</span>
-            <span className="hidden sm:inline">Gagnez du temps avec les raccourcis</span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => navigate("/commandes/new")}
-              className="gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Nouvelle commande</span>
-              <kbd className="hidden rounded bg-white/20 px-1 py-0.5 text-[10px] uppercase font-mono sm:inline">
-                Ctrl+N
-              </kbd>
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => navigate("/finances")}
-              className="gap-1.5"
-            >
-              <Receipt className="h-4 w-4" />
-              <span>Finances & Dépenses</span>
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => navigate("/commandes")}
-              className="gap-1.5"
-            >
-              <ClipboardList className="h-4 w-4" />
-              <span>Toutes les commandes</span>
-            </Button>
-          </div>
-        </div>
 
         {/* Live Operational KPI Cards */}
         {statsLoading ? (

@@ -29,7 +29,10 @@ import {
   PageLoader,
   ConfirmDialog,
   FieldError,
+  MoreMenu,
+  type MoreMenuItem,
 } from "@/components/ui";
+import { StatusSteps } from "@/components/orders/status-steps";
 import { StatusBadge } from "@/components/orders/status-badge";
 import { TypeBadge } from "@/components/orders/type-badge";
 import { PaymentModal } from "@/components/orders/payment-modal";
@@ -39,6 +42,7 @@ import { useAuthStore } from "@/hooks/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
 import {
   ORDER_EVENT_LABELS,
+  formatPhone,
   PAYMENT_KIND_LABELS,
   type PaymentKind,
 } from "@fuego/shared";
@@ -64,13 +68,15 @@ export default function OrderDetailPage() {
     enabled: Boolean(id),
   });
 
+  const done = (message: string) => () => {
+    queryClient.invalidateQueries({ queryKey: ["order", id] });
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+    toast.success(message);
+    setError(null);
+  };
+
   const mutationOptions = {
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["order", id] });
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      toast.success("Opération réussie");
-      setError(null);
-    },
+    onSuccess: done("Opération réussie"),
     onError: (err: any) => {
       setError(err?.message || "Une erreur est survenue");
       toast.error(err?.message || "Une erreur est survenue");
@@ -80,21 +86,25 @@ export default function OrderDetailPage() {
   const confirmMutation = useMutation({
     mutationFn: () => ordersApi.confirm(id!),
     ...mutationOptions,
+    onSuccess: done("Commande confirmée"),
   });
 
   const startMutation = useMutation({
     mutationFn: () => ordersApi.start(id!),
     ...mutationOptions,
+    onSuccess: done("Travail démarré"),
   });
 
   const readyMutation = useMutation({
     mutationFn: () => ordersApi.ready(id!),
     ...mutationOptions,
+    onSuccess: done("Commande prête"),
   });
 
   const deliverMutation = useMutation({
     mutationFn: ({ force = false }: { force?: boolean }) => ordersApi.deliver(id!, { force }),
     ...mutationOptions,
+    onSuccess: done("Commande livrée"),
   });
 
   const cancelMutation = useMutation({
@@ -103,7 +113,7 @@ export default function OrderDetailPage() {
     onSuccess: () => {
       setCancelModalOpen(false);
       setCancelReason("");
-      mutationOptions.onSuccess();
+      done("Commande annulée")();
     },
   });
 
@@ -111,7 +121,7 @@ export default function OrderDetailPage() {
     mutationFn: () => ordersApi.addNote(id!, { note: newNote }),
     onSuccess: () => {
       setNewNote("");
-      mutationOptions.onSuccess();
+      done("Note ajoutée")();
     },
     onError: mutationOptions.onError,
   });
@@ -134,14 +144,65 @@ export default function OrderDetailPage() {
   const isClosed = order.status === "delivered" || order.status === "cancelled";
   const canDeliver = order.reste <= 0;
 
+  // What blocks the main button, said in plain words next to it.
+  const nextStepHint =
+    order.status === "pending" && order.items.length === 0
+      ? "Ajoutez au moins un article pour confirmer"
+      : order.status === "ready" && !canDeliver
+        ? "Le solde doit être réglé avant la livraison"
+        : null;
+
+  // Everything that is not the next step lives in the "Plus" menu.
+  const moreItems: MoreMenuItem[] = [];
+  if (!isClosed) {
+    moreItems.push({
+      label: "Modifier la commande",
+      icon: <Edit className="h-4 w-4" />,
+      onClick: () => navigate(`/commandes/${id}/edit`),
+    });
+    if (order.reste > 0 && !(order.status === "ready" && !canDeliver)) {
+      moreItems.push({
+        label: "Enregistrer un paiement",
+        icon: <CreditCard className="h-4 w-4" />,
+        onClick: () => setPaymentModalOpen(true),
+      });
+    }
+  }
+  if (order.status !== "delivered") {
+    moreItems.push({
+      label: "Imprimer le ticket",
+      icon: <Printer className="h-4 w-4" />,
+      disabled: order.status === "pending",
+      hint: order.status === "pending" ? "Disponible après confirmation" : undefined,
+      onClick: () => navigate(`/commandes/${id}/ticket`),
+    });
+  }
+  if (order.status === "ready" && !canDeliver && isAdmin) {
+    moreItems.push({
+      label: "Forcer la livraison",
+      icon: <ShieldAlert className="h-4 w-4" />,
+      hint: "Admin — livrer malgré un reste à payer",
+      danger: true,
+      onClick: () => setForceDeliverOpen(true),
+    });
+  }
+  if (!isClosed) {
+    moreItems.push({
+      label: "Annuler la commande",
+      icon: <XCircle className="h-4 w-4" />,
+      danger: true,
+      onClick: () => setCancelModalOpen(true),
+    });
+  }
+
   return (
     <DashboardShell
       title={`Commande ${order.ticket_no}`}
       subtitle={`Créée le ${formatDateTime(order.created_at)}`}
     >
       <div className="mx-auto max-w-6xl space-y-6">
-        {/* Navigation & Header Actions */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        {/* Header: back, ONE main action for the next step, the rest in "Plus" */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="ghost"
             onClick={() => navigate("/commandes")}
@@ -152,151 +213,65 @@ export default function OrderDetailPage() {
           </Button>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Status transitions */}
+            {nextStepHint && <span className="text-xs text-text-secondary">{nextStepHint}</span>}
             {order.status === "pending" && (
-              <>
-                <Button
-                  variant="primary"
-                  loading={confirmMutation.isPending}
-                  disabled={order.items.length === 0}
-                  onClick={() => confirmMutation.mutate()}
-                  title={order.items.length === 0 ? "Ajoutez au moins un article avant de confirmer" : ""}
-                >
-                  <Check className="h-4 w-4" />
-                  <span>Confirmer</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => navigate(`/commandes/${id}/edit`)}
-                >
-                  <Edit className="h-4 w-4" />
-                  <span>Modifier</span>
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => setCancelModalOpen(true)}
-                >
-                  <XCircle className="h-4 w-4" />
-                  <span>Annuler</span>
-                </Button>
-              </>
+              <Button
+                className="px-5"
+                loading={confirmMutation.isPending}
+                disabled={order.items.length === 0}
+                onClick={() => confirmMutation.mutate()}
+              >
+                <Check className="h-4 w-4" />
+                <span>Confirmer la commande</span>
+              </Button>
             )}
-
             {order.status === "confirmed" && (
-              <>
-                <Button
-                  variant="primary"
-                  loading={startMutation.isPending}
-                  onClick={() => startMutation.mutate()}
-                >
-                  <Play className="h-4 w-4" />
-                  <span>Démarrer</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => navigate(`/commandes/${id}/edit`)}
-                >
-                  <Edit className="h-4 w-4" />
-                  <span>Modifier</span>
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => setCancelModalOpen(true)}
-                >
-                  <XCircle className="h-4 w-4" />
-                  <span>Annuler</span>
-                </Button>
-              </>
+              <Button
+                className="px-5"
+                loading={startMutation.isPending}
+                onClick={() => startMutation.mutate()}
+              >
+                <Play className="h-4 w-4" />
+                <span>Démarrer le travail</span>
+              </Button>
             )}
-
             {order.status === "in_progress" && (
-              <>
-                <Button
-                  variant="primary"
-                  loading={readyMutation.isPending}
-                  onClick={() => readyMutation.mutate()}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>Prête</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => navigate(`/commandes/${id}/edit`)}
-                >
-                  <Edit className="h-4 w-4" />
-                  <span>Modifier</span>
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => setCancelModalOpen(true)}
-                >
-                  <XCircle className="h-4 w-4" />
-                  <span>Annuler</span>
-                </Button>
-              </>
+              <Button
+                className="px-5"
+                loading={readyMutation.isPending}
+                onClick={() => readyMutation.mutate()}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Marquer prête</span>
+              </Button>
             )}
-
-            {order.status === "ready" && (
-              <>
-                {canDeliver ? (
-                  <Button
-                    variant="primary"
-                    loading={deliverMutation.isPending}
-                    onClick={() => deliverMutation.mutate({ force: false })}
-                  >
-                    <Truck className="h-4 w-4" />
-                    <span>Livrer</span>
-                  </Button>
-                ) : (
-                  <>
-                    <Button
-                      variant="secondary"
-                      onClick={() => setPaymentModalOpen(true)}
-                    >
-                      <CreditCard className="h-4 w-4" />
-                      <span>Régler le solde pour livrer</span>
-                    </Button>
-                    {isAdmin && (
-                      <Button
-                        variant="danger"
-                        onClick={() => setForceDeliverOpen(true)}
-                        title="Forcer la livraison malgré un reste à payer non soldé"
-                      >
-                        <ShieldAlert className="h-4 w-4" />
-                        <span>Forcer la livraison (Admin)</span>
-                      </Button>
-                    )}
-                  </>
-                )}
+            {order.status === "ready" &&
+              (canDeliver ? (
                 <Button
-                  variant="secondary"
-                  onClick={() => navigate(`/commandes/${id}/edit`)}
+                  className="px-5"
+                  loading={deliverMutation.isPending}
+                  onClick={() => deliverMutation.mutate({ force: false })}
                 >
-                  <Edit className="h-4 w-4" />
-                  <span>Modifier</span>
+                  <Truck className="h-4 w-4" />
+                  <span>Livrer la commande</span>
                 </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => setCancelModalOpen(true)}
-                >
-                  <XCircle className="h-4 w-4" />
-                  <span>Annuler</span>
+              ) : (
+                <Button className="px-5" onClick={() => setPaymentModalOpen(true)}>
+                  <CreditCard className="h-4 w-4" />
+                  <span>Encaisser le solde ({formatMillimes(order.reste)})</span>
                 </Button>
-              </>
+              ))}
+            {order.status === "delivered" && (
+              <Button className="px-5" onClick={() => navigate(`/commandes/${id}/ticket`)}>
+                <Printer className="h-4 w-4" />
+                <span>Imprimer le ticket</span>
+              </Button>
             )}
-
-            {/* Print Ticket */}
-            <Button
-              variant="secondary"
-              disabled={order.status === "pending"}
-              onClick={() => navigate(`/commandes/${id}/ticket`)}
-              title={order.status === "pending" ? "Le ticket est disponible après confirmation" : "Imprimer le ticket A4"}
-            >
-              <Printer className="h-4 w-4" />
-              <span>Imprimer Ticket</span>
-            </Button>
+            <MoreMenu items={moreItems} />
           </div>
         </div>
+
+        <StatusSteps status={order.status} />
 
         {error && <FieldError message={error} />}
 
@@ -322,7 +297,7 @@ export default function OrderDetailPage() {
               {order.customer_phone && (
                 <p className="flex items-center gap-2 text-xs text-text-secondary">
                   <Phone className="h-3.5 w-3.5 text-text-secondary" />
-                  <span>{order.customer_phone}</span>
+                  <span>{formatPhone(order.customer_phone)}</span>
                 </p>
               )}
               {order.order_type === "online" && (
@@ -352,7 +327,7 @@ export default function OrderDetailPage() {
                 Synthèse Financière
               </span>
               <Button
-                variant="primary"
+                variant="secondary"
                 className="h-8 px-3 text-xs"
                 onClick={() => setPaymentModalOpen(true)}
               >

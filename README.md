@@ -34,6 +34,36 @@ pnpm dev
 - Au premier lancement : assistant « Bienvenue » → nom du commerce + compte
   administrateur (créé seulement si aucun utilisateur n'existe).
 
+## Lancer l'application
+
+Double-clic sur **`Fuego.bat`** (ou `pnpm start`) : c'est le seul lanceur. Il
+installe et compile au besoin, puis ouvre l'app desktop autonome.
+`pnpm dev` reste réservé au développement (rechargement à chaud).
+
+## Installateur & mises à jour automatiques
+
+- Branche **`main`** : développement. Branche **`production`** : ce qui est
+  livré aux postes installés.
+- Chaque `git push` sur `production` lance `.github/workflows/release.yml` :
+  build → tests → installateur Windows → *release* GitHub versionnée
+  `1.0.<n° de run>` (aucun numéro de version à modifier à la main).
+- L'application installée vérifie ce flux au démarrage puis toutes les 4 h,
+  télécharge la nouvelle version en arrière-plan et propose de redémarrer
+  (sinon elle s'installe à la fermeture). Les données
+  (`%APPDATA%\@fuego\desktop`) ne sont jamais touchées.
+
+Livrer une mise à jour :
+
+```bash
+git checkout production && git merge main && git push && git checkout main
+```
+
+Construire l'installateur en local (sortie dans `apps/desktop/release/`) :
+
+```bash
+pnpm run build && pnpm -C apps/desktop run bundle && pnpm -C apps/desktop run dist
+```
+
 ## Mode production intégré (comme l'app finale)
 
 ```bash

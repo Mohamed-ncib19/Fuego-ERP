@@ -291,3 +291,37 @@ export interface PageMeta {
   limit: number;
   totalPages: number;
 }
+
+// ---------------------------------------------------------------------------
+// Phone numbers — Tunisia only: constant +216 prefix and 8 national digits.
+// Stored as the 8 digits ("22123456"), displayed as "+216 22 123 456".
+// ---------------------------------------------------------------------------
+
+export const PHONE_PREFIX = "+216";
+export const PHONE_DIGITS = 8;
+
+/** Keeps digits only, drops a typed/pasted 216 or 00216 prefix, caps at 8. */
+export function normalizePhone(input: string | null | undefined): string {
+  let digits = String(input ?? "").replace(/[^0-9]/g, "");
+  if (digits.length > PHONE_DIGITS && digits.startsWith("00216")) digits = digits.slice(5);
+  else if (digits.length > PHONE_DIGITS && digits.startsWith("216")) digits = digits.slice(3);
+  return digits.slice(0, PHONE_DIGITS);
+}
+
+export function isValidPhone(input: string | null | undefined): boolean {
+  return /^[0-9]{8}$/.test(String(input ?? ""));
+}
+
+/** National part grouped "xx xxx xxx" — works on partial input while typing. */
+export function formatPhoneLocal(input: string | null | undefined): string {
+  const d = normalizePhone(input);
+  return [d.slice(0, 2), d.slice(2, 5), d.slice(5, 8)].filter(Boolean).join(" ");
+}
+
+/** Full display form "+216 xx xxx xxx"; older free-text values pass through. */
+export function formatPhone(input: string | null | undefined): string {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const d = normalizePhone(raw);
+  return d.length === PHONE_DIGITS ? `${PHONE_PREFIX} ${formatPhoneLocal(d)}` : raw;
+}
