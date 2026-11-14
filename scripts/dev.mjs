@@ -91,7 +91,9 @@ waitOnTcp(5173)
     process.stdout.write("\x1b[35m[electron]\x1b[0m servers up — launching desktop shell\n");
     run("electron", "35", "electron", ["run", "dev"], "apps/desktop", {
       FUEGO_EMBED_BACKEND: "0",
-      VITE_DEV_SERVER_URL: "http://localhost:5173",
+      VITE_DEV_SERVER_URL: "http://127.0.0.1:5173",
+      FUEGO_PORT: "3220",
+      FUEGO_API_KEY: "fuego-dev-api-key",
     });
   })
   .catch((err) => {

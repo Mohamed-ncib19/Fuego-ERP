@@ -66,6 +66,18 @@ function pickPort(preferred: number): Promise<number> {
   });
 }
 
+// Boot diagnostics go to a file — stdout pipes die with the parent shell,
+// and an Electron crash here would otherwise be invisible.
+function dbg(...args: unknown[]) {
+  try {
+    fs.appendFileSync(path.join(__dirname, "..", "debug-boot.log"), `${new Date().toISOString()} ${args.join(" ")}\n`);
+  } catch {
+    /* diagnostics must never crash the app */
+  }
+}
+process.on("uncaughtException", (err) => dbg("UNCAUGHT:", String(err?.stack ?? err)));
+process.on("unhandledRejection", (err) => dbg("UNHANDLED REJECTION:", String((err as Error)?.stack ?? err)));
+
 let mainWindow: BrowserWindow | null = null;
 
 async function createWindow() {
@@ -75,67 +87,76 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 600,
     title: "Fuego",
+    show: true,
     backgroundColor: "#0b1021",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      // Only the preload needs the bridge; the renderer stays sandboxed
-      // from Node (standard secure Electron posture).
       sandbox: false,
     },
   });
 
-  // Any target=_blank / external link opens in the system browser, never a
-  // new Electron window (the desktop app has exactly one surface).
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
   });
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    // Prod: the backend serves the built SPA on the same origin.
-    const port = Number(process.env.FUEGO_PORT ?? 3220);
-    await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
+  mainWindow.webContents.on("did-finish-load", () => {
+    dbg("Window loaded successfully");
+  });
+
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    dbg("Window failed to load:", errorCode, errorDescription, validatedURL);
+  });
+
+  const url = process.env.VITE_DEV_SERVER_URL || `http://127.0.0.1:${process.env.FUEGO_PORT ?? 3220}/`;
+  dbg("Loading URL:", url);
+
+  try {
+    await mainWindow.loadURL(url);
+  } catch (err: any) {
+    dbg("Initial load failed, will retry:", err?.message || err);
+    setTimeout(() => {
+      mainWindow?.loadURL(url).catch((e) => dbg("Retry failed:", e?.message));
+    }, 1500);
   }
+
+  mainWindow.show();
+  mainWindow.focus();
 }
 
 // One app instance at a time — a second launch would otherwise boot a second
 // backend on another port that opens the same SQLite file. The first instance
 // wins; the duplicate launch simply brings the existing window forward.
-if (!app.requestSingleInstanceLock()) {
+const gotLock = app.requestSingleInstanceLock();
+dbg("got single instance lock:", gotLock);
+if (!gotLock) {
   app.quit();
+  process.exit(0);
 }
 
 app.whenReady().then(async () => {
-  // Boot diagnostics go to a file — stdout pipes die with the parent shell,
-  // and an Electron crash here would otherwise be invisible.
-  const dbg = (...args: unknown[]) => {
-    try {
-      fs.appendFileSync(path.join(__dirname, "..", "debug-boot.log"), `${new Date().toISOString()} ${args.join(" ")}\n`);
-    } catch {
-      /* diagnostics must never crash the app */
-    }
-  };
-  process.on("uncaughtException", (err) => dbg("UNCAUGHT:", String(err?.stack ?? err)));
-  process.on("unhandledRejection", (err) => dbg("UNHANDLED REJECTION:", String((err as Error)?.stack ?? err)));
-
   const secrets = loadOrCreateSecrets();
   dbg("secrets ready");
 
   app.on("second-instance", () => {
-    // Someone launched the app again — focus the existing window instead.
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
-  const port = await pickPort(3220);
-  process.env.FUEGO_PORT = String(port);
-  dbg("port picked", port);
+
+  let port = 3220;
+  if (isDev) {
+    port = Number(process.env.FUEGO_PORT || 3220);
+    process.env.FUEGO_PORT = String(port);
+  } else {
+    port = await pickPort(3220);
+    process.env.FUEGO_PORT = String(port);
+  }
+  dbg("port resolved:", port);
 
   if (!isDev) {
     // Embed the API in this process — one binary, zero extra services.
@@ -152,16 +173,17 @@ app.whenReady().then(async () => {
     dbg("backend booted on", port);
   }
 
+  const apiKey = (isDev && process.env.FUEGO_API_KEY) ? process.env.FUEGO_API_KEY : secrets.api_key;
+
   ipcMain.handle("app:launch-info", () => ({
     version: app.getVersion(),
     apiPort: port,
-    apiKey: secrets.api_key,
+    apiKey: apiKey,
   }));
 
   await createWindow();
 
   app.on("activate", () => {
-    // macOS convention: re-open the window when the dock icon is clicked.
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
 });
