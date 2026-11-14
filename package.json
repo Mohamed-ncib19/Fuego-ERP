@@ -11,6 +11,7 @@
     "typecheck": "pnpm -r run typecheck",
     "db:push": "pnpm -C apps/backend run db:push",
     "test:api": "node scripts/test-phase0.mjs",
+    "test:phase1": "node scripts/test-phase1.mjs",
     "postinstall": "node scripts/check-deps.mjs"
   },
   "devDependencies": {

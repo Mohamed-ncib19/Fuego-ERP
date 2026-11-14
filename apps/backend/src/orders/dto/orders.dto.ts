@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -113,6 +114,34 @@ export class UpdateOrderDto {
   @Type(() => OrderItemDto)
   @ValidateNested({ each: true })
   items?: OrderItemDto[];
+}
+
+export class ConfirmOrderDto {
+  @IsInt({ message: "Le montant de l'avance doit être un entier en millimes" })
+  @Min(0, { message: "Le montant de l'avance doit être positif" })
+  @IsOptional()
+  advance_amount?: number;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  note?: string;
+}
+
+export class TransitionDto {
+  @IsBoolean()
+  @IsOptional()
+  force?: boolean;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  note?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  reason?: string;
 }
 
 export class RecordPaymentDto {

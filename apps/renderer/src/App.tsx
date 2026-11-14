@@ -11,10 +11,11 @@ import DashboardPage from "@/pages/dashboard";
 import UsersSettingsPage from "@/pages/settings-users";
 import SettingsPage from "@/pages/settings";
 import ProfilePage from "@/pages/profile";
-import {
-  OrdersPlaceholderPage,
-  FinancesPlaceholderPage,
-} from "@/pages/placeholders";
+import OrdersListPage from "@/pages/orders-list";
+import OrderFormPage from "@/pages/order-form";
+import OrderDetailPage from "@/pages/order-detail";
+import OrderTicketPage from "@/pages/order-ticket";
+import { FinancesPlaceholderPage } from "@/pages/placeholders";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,14 +70,49 @@ function AppRoutes() {
           </RequireAuth>
         }
       />
+      {/* Orders module routes */}
       <Route
-        path="/orders"
+        path="/commandes"
         element={
           <RequireAuth>
-            <OrdersPlaceholderPage />
+            <OrdersListPage />
           </RequireAuth>
         }
       />
+      <Route
+        path="/commandes/new"
+        element={
+          <RequireAuth>
+            <OrderFormPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/commandes/:id"
+        element={
+          <RequireAuth>
+            <OrderDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/commandes/:id/edit"
+        element={
+          <RequireAuth>
+            <OrderFormPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/commandes/:id/ticket"
+        element={
+          <RequireAuth>
+            <OrderTicketPage />
+          </RequireAuth>
+        }
+      />
+      {/* Redirect old /orders to /commandes */}
+      <Route path="/orders" element={<Navigate to="/commandes" replace />} />
       <Route
         path="/finances"
         element={
@@ -119,16 +155,12 @@ function AppRoutes() {
 }
 
 export default function App() {
-  // Pick up the API key from the Electron preload (null in a plain browser).
   useEffect(() => {
     const bridge = (window as any).fuego;
     if (bridge?.getLaunchInfo) {
-      bridge
-        .getLaunchInfo()
-        .then((info: { apiKey: string | null }) => setApiKey(info.apiKey))
-        .catch(() => setApiKey(null));
-    } else {
-      setApiKey(null);
+      bridge.getLaunchInfo().then((info: any) => {
+        if (info?.api_key) setApiKey(info.api_key);
+      });
     }
   }, []);
 

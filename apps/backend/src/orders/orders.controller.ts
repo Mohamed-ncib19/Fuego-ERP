@@ -12,6 +12,8 @@ import { OrdersService } from "./orders.service";
 import {
   CreateOrderDto,
   UpdateOrderDto,
+  ConfirmOrderDto,
+  TransitionDto,
   RecordPaymentDto,
   AddOrderNoteDto,
 } from "./dto/orders.dto";
@@ -69,36 +71,48 @@ export class OrdersController {
   }
 
   @Post(":id/confirm")
-  async confirm(@Param("id") id: string, @CurrentUser() actor: Actor) {
-    return this.ordersService.confirmOrder(id, actor);
+  async confirm(
+    @Param("id") id: string,
+    @Body() dto: ConfirmOrderDto,
+    @CurrentUser() actor: Actor,
+  ) {
+    return this.ordersService.confirmOrder(id, dto, actor);
   }
 
   @Post(":id/start")
-  async start(@Param("id") id: string, @CurrentUser() actor: Actor) {
-    return this.ordersService.startOrder(id, actor);
+  async start(
+    @Param("id") id: string,
+    @Body() dto: TransitionDto,
+    @CurrentUser() actor: Actor,
+  ) {
+    return this.ordersService.startOrder(id, dto, actor);
   }
 
   @Post(":id/ready")
-  async ready(@Param("id") id: string, @CurrentUser() actor: Actor) {
-    return this.ordersService.readyOrder(id, actor);
+  async ready(
+    @Param("id") id: string,
+    @Body() dto: TransitionDto,
+    @CurrentUser() actor: Actor,
+  ) {
+    return this.ordersService.readyOrder(id, dto, actor);
   }
 
   @Post(":id/deliver")
   async deliver(
     @Param("id") id: string,
-    @Body("force") force: boolean,
+    @Body() dto: TransitionDto,
     @CurrentUser() actor: Actor,
   ) {
-    return this.ordersService.deliverOrder(id, actor, force);
+    return this.ordersService.deliverOrder(id, dto, actor);
   }
 
   @Post(":id/cancel")
   async cancel(
     @Param("id") id: string,
-    @Body("reason") reason: string,
+    @Body() dto: TransitionDto,
     @CurrentUser() actor: Actor,
   ) {
-    return this.ordersService.cancelOrder(id, actor, reason);
+    return this.ordersService.cancelOrder(id, dto, actor);
   }
 
   @Post(":id/notes")

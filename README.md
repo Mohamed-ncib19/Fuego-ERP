@@ -46,12 +46,14 @@ L'app Electron embarque l'API dans son processus principal, sert le SPA
 same-origin (cookies httpOnly), stocke la base et les secrets dans
 `%APPDATA%\@fuego\desktop\`.
 
-## Tests API (Phase 0)
+## Tests API (Phase 0 & Phase 1)
 
-Lancer le backend seul puis :
+Lancer le dev stack (`pnpm dev`) puis :
 
 ```bash
-pnpm test:api   # 34 vérifications : setup, login, users, rôles, audit…
+pnpm test:api      # 34 vérifications : setup, login, users, rôles, audit…
+pnpm test:phase1   # Cycle complet commandes : brouillon, articles, avance, workflow, solde, livraison
+pnpm -C apps/backend test # Tests unitaires Vitest (20 tests)
 ```
 
 ## Backend seul (tests API)
@@ -63,8 +65,7 @@ curl http://127.0.0.1:3220/api/health -H "x-api-key: fuego-dev-api-key"
 
 ## Étapes
 
-- **Phase 0 (en cours)** : login JWT, gestion des utilisateurs (admin), audit,
-  assistant première installation.
-- **Phase 1** : commandes (avance, confirmation, local/online, statuts, tickets).
+- **Phase 0** : login JWT, gestion des utilisateurs (admin), audit, assistant première installation. ✅ **Terminé**
+- **Phase 1** : commandes (articles, avance, confirmation, local/online, workflow, kanban, tickets A4 imprimables). ✅ **Terminé**
 - **Phase 2** : finances (revenus, dépenses, tableau de bord).
 - **Phase 3** : sauvegardes, packaging electron-builder, auto-update.

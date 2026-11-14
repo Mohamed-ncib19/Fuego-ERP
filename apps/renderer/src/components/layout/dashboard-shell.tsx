@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Flame,
@@ -10,19 +11,20 @@ import {
   LogOut,
   Moon,
   Sun,
+  Plus,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { authApi } from "@/lib/api/auth.api";
 import { roleLabel } from "@/lib/format";
-import { Badge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 
 const navItems = [
-  { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, admin: false },
-  { to: "/orders", label: "Commandes", icon: ClipboardList, soon: true, admin: false },
+  { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, soon: false, admin: false },
+  { to: "/commandes", label: "Commandes", icon: ClipboardList, soon: false, admin: false },
   { to: "/finances", label: "Finances", icon: Wallet, soon: true, admin: false },
-  { to: "/settings/users", label: "Utilisateurs", icon: Users, admin: true },
-  { to: "/settings", label: "Paramètres", icon: SettingsIcon, admin: true },
+  { to: "/settings/users", label: "Utilisateurs", icon: Users, soon: false, admin: true },
+  { to: "/settings", label: "Paramètres", icon: SettingsIcon, soon: false, admin: true },
 ];
 
 export function DashboardShell({
@@ -38,6 +40,17 @@ export function DashboardShell({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isAdmin = user?.role === "super_admin";
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        navigate("/commandes/new");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [navigate]);
 
   const toggleTheme = () => {
     const isDark = document.documentElement.classList.toggle("dark");
@@ -125,7 +138,16 @@ export function DashboardShell({
             <h1 className="text-h2 font-bold text-text-primary">{title}</h1>
             {subtitle && <p className="text-sm text-text-secondary">{subtitle}</p>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="primary"
+              className="h-9 px-3 text-xs"
+              onClick={() => navigate("/commandes/new")}
+              title="Créer une commande (Ctrl+N)"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Nouvelle commande</span>
+            </Button>
             {isAdmin && <Badge tone="primary">Admin</Badge>}
             <button
               onClick={toggleTheme}

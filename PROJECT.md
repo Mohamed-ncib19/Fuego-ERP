@@ -151,7 +151,7 @@ Kept from the reference (conventions we copy verbatim):
 | Phase | Scope | Status |
 |---|---|---|
 | **0 — Foundation** | Monorepo, Electron shell, embedded NestJS + SQLite, auth (login/JWT), admin user CRUD, audit log, **first-run admin creation** | ✅ **DONE — 34/34 API tests passed, Electron window verified** |
-| **1 — Orders** | Order CRUD + workflow (confirm/cancel/progress), payments ledger, advance rule, ticket printing, order search/list filters | 🟡 **In Progress (Backend API, Schema & Tests ✅ DONE — 19/19 unit tests passing)** |
+| **1 — Orders** | Order CRUD + workflow (confirm/cancel/progress), payments ledger, advance rule, ticket printing, order search/list filters, Kanban, table, A4 ticket | ✅ **DONE — 20/20 unit tests, full smoke test passing, complete UI & ticket printing** |
 | **2 — Finance** | Expenses CRUD + categories, income views, dashboard KPIs + charts, reports & export | later |
 | **3 — Polish** | Settings screen, audit viewer UI, backups (copy of the SQLite file), auto-update, installer | later |
 

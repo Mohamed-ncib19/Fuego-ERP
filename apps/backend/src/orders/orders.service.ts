@@ -27,6 +27,8 @@ import {
 import type {
   CreateOrderDto,
   UpdateOrderDto,
+  ConfirmOrderDto,
+  TransitionDto,
   RecordPaymentDto,
   AddOrderNoteDto,
 } from "./dto/orders.dto";
@@ -219,7 +221,6 @@ export class OrdersService {
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
 
-    // Direct SQLite queries for high performance and clean computed columns
     const countRow = this.db.client
       .select({ count: sql<number>`count(*)` })
       .from(orders)
@@ -398,12 +399,12 @@ export class OrdersService {
     const isClosed = existing.status === "delivered" || existing.status === "cancelled";
     const changingMoney = dto.items !== undefined || dto.delivery_fee !== undefined;
     if (isClosed && changingMoney) {
-      throw new ConflictException("Impossible de modifier le montant d'une commande livrée ou annulée");
+      throw new ConflictException("Une commande livrée ou annulée ne peut plus être modifiée au niveau financier");
     }
 
     // Rule: order_type cannot be changed after confirmation
     if (existing.status !== "pending" && dto.order_type && dto.order_type !== existing.order_type) {
-      throw new ConflictException("Le type de commande ne peut plus être modifié après confirmation");
+      throw new ConflictException("Le type de commande n'est plus modifiable après confirmation");
     }
 
     const orderType = dto.order_type ?? existing.order_type;
@@ -483,8 +484,8 @@ export class OrdersService {
     return this.getOrder(id);
   }
 
-  /** Confirm draft order. Requires at least one item. */
-  async confirmOrder(id: string, actor: Actor): Promise<OrderDetail> {
+  /** Confirm draft order. Requires at least one item. Optionally records advance payment. */
+  async confirmOrder(id: string, dto: ConfirmOrderDto = {}, actor: Actor): Promise<OrderDetail> {
     const existing = await this.getOrder(id);
     if (existing.status !== "pending") {
       throw new ConflictException("Transition impossible depuis le statut actuel");
@@ -504,11 +505,24 @@ export class OrdersService {
         .where(eq(orders.id, id))
         .run();
 
+      if (dto.advance_amount && dto.advance_amount > 0) {
+        trx.insert(payments).values({
+          id: randomUUID(),
+          order_id: id,
+          kind: "advance",
+          amount: dto.advance_amount,
+          note: dto.note?.trim() || "Avance à la confirmation",
+          recorded_by: actor.id,
+          recorded_by_label: actor.full_name,
+          created_at: now,
+        }).run();
+      }
+
       trx.insert(orderEvents).values({
         id: randomUUID(),
         order_id: id,
         type: "confirmed",
-        payload: null,
+        payload: JSON.stringify({ advance_amount: dto.advance_amount ?? 0, note: dto.note || null }),
         actor_id: actor.id,
         actor_label: actor.full_name,
         created_at: now,
@@ -523,13 +537,14 @@ export class OrdersService {
       actorId: actor.id,
       actorLabel: actor.full_name,
       actorRole: actor.role,
+      meta: { advance_amount: dto.advance_amount },
     });
 
     return this.getOrder(id);
   }
 
   /** Move confirmed order to in_progress. */
-  async startOrder(id: string, actor: Actor): Promise<OrderDetail> {
+  async startOrder(id: string, dto: TransitionDto = {}, actor: Actor): Promise<OrderDetail> {
     const existing = await this.getOrder(id);
     if (existing.status !== "confirmed") {
       throw new ConflictException("Transition impossible depuis le statut actuel");
@@ -542,7 +557,7 @@ export class OrdersService {
         id: randomUUID(),
         order_id: id,
         type: "started",
-        payload: null,
+        payload: dto.note ? JSON.stringify({ note: dto.note }) : null,
         actor_id: actor.id,
         actor_label: actor.full_name,
         created_at: now,
@@ -563,7 +578,7 @@ export class OrdersService {
   }
 
   /** Move in_progress order to ready. */
-  async readyOrder(id: string, actor: Actor): Promise<OrderDetail> {
+  async readyOrder(id: string, dto: TransitionDto = {}, actor: Actor): Promise<OrderDetail> {
     const existing = await this.getOrder(id);
     if (existing.status !== "in_progress") {
       throw new ConflictException("Transition impossible depuis le statut actuel");
@@ -576,7 +591,7 @@ export class OrdersService {
         id: randomUUID(),
         order_id: id,
         type: "readied",
-        payload: null,
+        payload: dto.note ? JSON.stringify({ note: dto.note }) : null,
         actor_id: actor.id,
         actor_label: actor.full_name,
         created_at: now,
@@ -597,17 +612,20 @@ export class OrdersService {
   }
 
   /** Deliver order. Requires reste <= 0 unless forced by super_admin. */
-  async deliverOrder(id: string, actor: Actor, force = false): Promise<OrderDetail> {
+  async deliverOrder(id: string, dto: TransitionDto = {}, actor: Actor): Promise<OrderDetail> {
     const existing = await this.getOrder(id);
-    if (existing.status === "delivered" || existing.status === "cancelled") {
+    if (existing.status !== "ready") {
       throw new ConflictException("Transition impossible depuis le statut actuel");
     }
 
-    const isOverdueOrUnpaid = existing.reste > 0;
-    if (isOverdueOrUnpaid) {
-      const canForce = force && actor.role === "super_admin";
-      if (!canForce) {
-        throw new ConflictException("Le solde doit être réglé avant la livraison");
+    const isUnpaid = existing.reste > 0;
+    if (isUnpaid) {
+      if (dto.force) {
+        if (actor.role !== "super_admin") {
+          throw new ForbiddenException("Seul un administrateur peut forcer la livraison");
+        }
+      } else {
+        throw new ConflictException("Le reste à payer doit être soldé avant la livraison");
       }
     }
 
@@ -618,7 +636,11 @@ export class OrdersService {
         id: randomUUID(),
         order_id: id,
         type: "delivered",
-        payload: isOverdueOrUnpaid ? JSON.stringify({ forced: true, reste: existing.reste }) : null,
+        payload: JSON.stringify({
+          note: dto.note || null,
+          forced: Boolean(isUnpaid && dto.force),
+          reste_at_delivery: existing.reste,
+        }),
         actor_id: actor.id,
         actor_label: actor.full_name,
         created_at: now,
@@ -633,14 +655,14 @@ export class OrdersService {
       actorId: actor.id,
       actorLabel: actor.full_name,
       actorRole: actor.role,
-      meta: { forced: isOverdueOrUnpaid && force },
+      meta: { forced: isUnpaid && dto.force },
     });
 
     return this.getOrder(id);
   }
 
   /** Cancel order. */
-  async cancelOrder(id: string, actor: Actor, reason?: string): Promise<OrderDetail> {
+  async cancelOrder(id: string, dto: TransitionDto = {}, actor: Actor): Promise<OrderDetail> {
     const existing = await this.getOrder(id);
     if (existing.status === "delivered" || existing.status === "cancelled") {
       throw new ConflictException("Transition impossible depuis le statut actuel");
@@ -653,7 +675,7 @@ export class OrdersService {
         id: randomUUID(),
         order_id: id,
         type: "cancelled",
-        payload: JSON.stringify({ reason: reason?.trim() || null, reste: existing.reste }),
+        payload: JSON.stringify({ reason: dto.reason?.trim() || dto.note?.trim() || null, reste: existing.reste }),
         actor_id: actor.id,
         actor_label: actor.full_name,
         created_at: now,
@@ -668,7 +690,7 @@ export class OrdersService {
       actorId: actor.id,
       actorLabel: actor.full_name,
       actorRole: actor.role,
-      meta: { reason },
+      meta: { reason: dto.reason || dto.note },
     });
 
     return this.getOrder(id);
@@ -696,8 +718,10 @@ export class OrdersService {
   async recordPayment(id: string, dto: RecordPaymentDto, actor: Actor): Promise<OrderDetail> {
     const existing = await this.getOrder(id);
 
-    if ((existing.status === "delivered" || existing.status === "cancelled") && dto.kind !== "refund") {
-      throw new ConflictException("Seul le remboursement est autorisé sur une commande livrée ou annulée");
+    // Status matrix: advance/balance allowed on pending/confirmed/in_progress/ready; only refund on delivered/cancelled.
+    const isClosed = existing.status === "delivered" || existing.status === "cancelled";
+    if (isClosed && dto.kind !== "refund") {
+      throw new ConflictException(`Ce type de paiement n'est pas autorisé pour une commande ${existing.status}`);
     }
 
     if (dto.kind === "refund") {

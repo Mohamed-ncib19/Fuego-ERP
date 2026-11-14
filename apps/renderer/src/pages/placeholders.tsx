@@ -1,27 +1,18 @@
-import { ClipboardList, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { Card, Badge } from "@/components/ui";
 
-/** Placeholders — the real screens arrive with Phase 1 (orders) and
- * Phase 2 (finance). Shown as disabled sidebar entries too. */
-export function OrdersPlaceholderPage() {
-  return (
-    <DashboardShell
-      title="Commandes"
-      subtitle="Création, confirmation et suivi des commandes"
-    >
-      <Card className="p-8">
-        <Placeholder icon={<ClipboardList className="h-10 w-10" />} phase="Phase 1" title="Bientôt disponible" description="Créez des commandes avec description, avance (avance), type local/online, statut de progression et tickets imprimables." />
-      </Card>
-    </DashboardShell>
-  );
-}
-
+/** Placeholders — the real screens arrive with Phase 2 (finance). */
 export function FinancesPlaceholderPage() {
   return (
     <DashboardShell title="Finances" subtitle="Revenus, dépenses et bénéfices">
       <Card className="p-8">
-        <Placeholder icon={<Wallet className="h-10 w-10" />} phase="Phase 2" title="Bientôt disponible" description="Suivi complet des revenus (avances + soldes), des dépenses et du bénéfice, avec graphiques et export." />
+        <Placeholder
+          icon={<Wallet className="h-10 w-10" />}
+          phase="Phase 2"
+          title="Bientôt disponible"
+          description="Suivi complet des revenus (avances + soldes), des dépenses et du bénéfice, avec graphiques et export."
+        />
       </Card>
     </DashboardShell>
   );

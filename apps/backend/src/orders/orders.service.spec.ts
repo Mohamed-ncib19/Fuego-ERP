@@ -100,12 +100,12 @@ describe("OrdersService — full lifecycle & business rules", () => {
       staffActor,
     );
 
-    await expect(service.confirmOrder(draft.id, staffActor)).rejects.toThrow(
+    await expect(service.confirmOrder(draft.id, {}, staffActor)).rejects.toThrow(
       "Ajoutez au moins un article avant de confirmer",
     );
   });
 
-  it("supports full order workflow: items, confirm, start, ready, pay, deliver", async () => {
+  it("supports full order workflow: items, confirm with advance, start, ready, pay, deliver", async () => {
     // 1. Create with items
     const order = await service.createOrder(
       {
@@ -115,42 +115,60 @@ describe("OrdersService — full lifecycle & business rules", () => {
       staffActor,
     );
 
-    // 2. Confirm
-    const confirmed = await service.confirmOrder(order.id, staffActor);
+    // 2. Confirm with optional advance
+    const confirmed = await service.confirmOrder(order.id, { advance_amount: 10000, note: "Espèces" }, staffActor);
     expect(confirmed.status).toBe("confirmed");
+    expect(confirmed.paid).toBe(10000);
+    expect(confirmed.reste).toBe(20000);
 
     // 3. Start
-    const started = await service.startOrder(order.id, staffActor);
+    const started = await service.startOrder(order.id, {}, staffActor);
     expect(started.status).toBe("in_progress");
 
     // 4. Ready
-    const ready = await service.readyOrder(order.id, staffActor);
+    const ready = await service.readyOrder(order.id, {}, staffActor);
     expect(ready.status).toBe("ready");
 
     // 5. Try delivering while unpaid without force -> fails
-    await expect(service.deliverOrder(order.id, staffActor, false)).rejects.toThrow(
-      "Le solde doit être réglé avant la livraison",
+    await expect(service.deliverOrder(order.id, {}, staffActor)).rejects.toThrow(
+      "Le reste à payer doit être soldé avant la livraison",
     );
 
-    // 6. Pay advance
-    await service.recordPayment(
-      order.id,
-      { kind: "advance", amount: 10000, note: "Espèces" },
-      staffActor,
-    );
-
-    // 7. Pay balance
+    // 6. Pay balance
     await service.recordPayment(
       order.id,
       { kind: "balance", amount: 20000, note: "Virement" },
       staffActor,
     );
 
-    // 8. Deliver succeeds now that reste <= 0
-    const delivered = await service.deliverOrder(order.id, staffActor, false);
+    // 7. Deliver succeeds now that reste <= 0
+    const delivered = await service.deliverOrder(order.id, {}, staffActor);
     expect(delivered.status).toBe("delivered");
     expect(delivered.paid).toBe(30000);
     expect(delivered.reste).toBe(0);
+  });
+
+  it("allows super_admin to force-deliver unpaid order and blocks staff from forcing", async () => {
+    const order = await service.createOrder(
+      {
+        customer_name: "Client VIP",
+        items: [{ label: "Enseigne", quantity: 1, unit_price: 100000 }],
+      },
+      staffActor,
+    );
+    await service.confirmOrder(order.id, {}, staffActor);
+    await service.startOrder(order.id, {}, staffActor);
+    await service.readyOrder(order.id, {}, staffActor);
+
+    // Staff force delivery -> 403 Forbidden
+    await expect(service.deliverOrder(order.id, { force: true }, staffActor)).rejects.toThrow(
+      "Seul un administrateur peut forcer la livraison",
+    );
+
+    // Super admin force delivery -> succeeds
+    const delivered = await service.deliverOrder(order.id, { force: true }, adminActor);
+    expect(delivered.status).toBe("delivered");
+    expect(delivered.reste).toBe(100000);
   });
 
   it("enforces edit rules: cannot change order_type after confirmation", async () => {
@@ -163,14 +181,14 @@ describe("OrdersService — full lifecycle & business rules", () => {
       staffActor,
     );
 
-    await service.confirmOrder(order.id, staffActor);
+    await service.confirmOrder(order.id, {}, staffActor);
 
     await expect(
       service.updateOrder(order.id, { order_type: "online", delivery_address: "Sousse" }, staffActor),
-    ).rejects.toThrow("Le type de commande ne peut plus être modifié après confirmation");
+    ).rejects.toThrow("Le type de commande n'est plus modifiable après confirmation");
   });
 
-  it("enforces payment rules: refund cannot exceed paid amount", async () => {
+  it("enforces payment rules: refund cannot exceed paid amount and only refund allowed on delivered/cancelled", async () => {
     const order = await service.createOrder(
       {
         customer_name: "Client Refund",
@@ -184,6 +202,17 @@ describe("OrdersService — full lifecycle & business rules", () => {
     await expect(
       service.recordPayment(order.id, { kind: "refund", amount: 8000 }, staffActor),
     ).rejects.toThrow("Le remboursement dépasse le montant payé");
+
+    await service.cancelOrder(order.id, { reason: "Erreur client" }, staffActor);
+
+    // Cannot add advance on cancelled
+    await expect(
+      service.recordPayment(order.id, { kind: "advance", amount: 1000 }, staffActor),
+    ).rejects.toThrow("Ce type de paiement n'est pas autorisé pour une commande cancelled");
+
+    // Can refund on cancelled
+    const refunded = await service.recordPayment(order.id, { kind: "refund", amount: 5000 }, staffActor);
+    expect(refunded.paid).toBe(0);
   });
 
   it("lists orders with status and search filters", async () => {
@@ -193,7 +222,6 @@ describe("OrdersService — full lifecycle & business rules", () => {
 
     expect(res.data.length).toBeGreaterThan(0);
     expect(res.data[0].customer_name).toBe("Client Refund");
-    expect(res.data[0].paid).toBe(5000);
     expect(res.meta.total).toBeGreaterThan(0);
   });
 });
