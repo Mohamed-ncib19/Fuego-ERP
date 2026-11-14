@@ -4,11 +4,11 @@
  * Responsibilities:
  *  1. resolve the data folder (Electron userData) and generate/keep secrets
  *     (API key + JWT) in a local secrets.json — created once, reused after;
- *  2. boot the NestJS backend **inside this process** (production) or skip
- *     it in dev (FUEGO_EMBED_BACKEND=0 — the dev orchestrator runs a
- *     standalone watching backend instead);
- *  3. open the window loading the built renderer from the API origin
- *     (same-origin → session cookies work), or the Vite dev server in dev;
+ *  2. in production, spawn the NestJS backend as a background Node service
+ *     (pure Node environment with native SQLite, zero ABI/IPC conflicts);
+ *     in dev, use the standalone dev backend;
+ *  3. open the native desktop window loading the built renderer from the API
+ *     origin or Vite in dev;
  *  4. expose apiKey/port/version to the renderer through the preload bridge.
  */
 import { app, BrowserWindow, ipcMain, shell } from "electron";
@@ -16,8 +16,12 @@ import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import net from "node:net";
+import { fork, type ChildProcess } from "node:child_process";
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL || process.env.FUEGO_EMBED_BACKEND === "0";
+
+let backendProcess: ChildProcess | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 interface Secrets {
   api_key: string;
@@ -66,19 +70,40 @@ function pickPort(preferred: number): Promise<number> {
   });
 }
 
-// Boot diagnostics go to a file — stdout pipes die with the parent shell,
-// and an Electron crash here would otherwise be invisible.
+/** Polls a local TCP port until it answers or times out. */
+async function waitOnTcp(port: number, timeoutMs = 30_000): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const isUp = await new Promise<boolean>((resolve) => {
+      const socket = net.connect({ port, host: "127.0.0.1" });
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+    if (isUp) return true;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  throw new Error(`Timed out waiting for port ${port}`);
+}
+
+// Boot diagnostics log
 function dbg(...args: unknown[]) {
   try {
-    fs.appendFileSync(path.join(__dirname, "..", "debug-boot.log"), `${new Date().toISOString()} ${args.join(" ")}\n`);
+    fs.appendFileSync(
+      path.join(__dirname, "..", "debug-boot.log"),
+      `${new Date().toISOString()} ${args.join(" ")}\n`,
+    );
   } catch {
     /* diagnostics must never crash the app */
   }
 }
 process.on("uncaughtException", (err) => dbg("UNCAUGHT:", String(err?.stack ?? err)));
 process.on("unhandledRejection", (err) => dbg("UNHANDLED REJECTION:", String((err as Error)?.stack ?? err)));
-
-let mainWindow: BrowserWindow | null = null;
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
@@ -117,19 +142,17 @@ async function createWindow() {
   try {
     await mainWindow.loadURL(url);
   } catch (err: any) {
-    dbg("Initial load failed, will retry:", err?.message || err);
+    dbg("Initial load failed, retrying in 1s:", err?.message || err);
     setTimeout(() => {
       mainWindow?.loadURL(url).catch((e) => dbg("Retry failed:", e?.message));
-    }, 1500);
+    }, 1200);
   }
 
   mainWindow.show();
   mainWindow.focus();
 }
 
-// One app instance at a time — a second launch would otherwise boot a second
-// backend on another port that opens the same SQLite file. The first instance
-// wins; the duplicate launch simply brings the existing window forward.
+// Single instance lock
 const gotLock = app.requestSingleInstanceLock();
 dbg("got single instance lock:", gotLock);
 if (!gotLock) {
@@ -159,21 +182,34 @@ app.whenReady().then(async () => {
   dbg("port resolved:", port);
 
   if (!isDev) {
-    // Embed the API in this process — one binary, zero extra services.
-    const backend = require("@fuego/backend") as typeof import("@fuego/backend");
-    dbg("booting backend…");
-    await backend.bootServer({
-      port,
-      dbPath: path.join(app.getPath("userData"), "data", "fuego.db"),
-      apiKey: secrets.api_key,
-      jwtSecret: secrets.jwt_secret,
-      jwtRefreshSecret: secrets.jwt_refresh_secret,
-      rendererDist: path.join(__dirname, "..", "..", "renderer", "dist"),
+    // Standalone production: launch background backend process cleanly via fork
+    const backendScript = path.resolve(__dirname, "..", "..", "backend", "dist", "main.js");
+    dbg("Spawning backend child process:", backendScript);
+
+    const env = {
+      ...process.env,
+      PORT: String(port),
+      DB_PATH: path.join(app.getPath("userData"), "data", "fuego.db"),
+      FUEGO_API_KEY: secrets.api_key,
+      JWT_SECRET: secrets.jwt_secret,
+      JWT_REFRESH_SECRET: secrets.jwt_refresh_secret,
+      RENDERER_DIST: path.resolve(__dirname, "..", "..", "renderer", "dist"),
+    };
+
+    backendProcess = fork(backendScript, [], {
+      env,
+      stdio: "pipe",
     });
-    dbg("backend booted on", port);
+
+    backendProcess.stdout?.on("data", (d) => dbg("[api]", d.toString().trim()));
+    backendProcess.stderr?.on("data", (d) => dbg("[api err]", d.toString().trim()));
+    backendProcess.on("exit", (code) => dbg("[api exit]", code));
+
+    await waitOnTcp(port, 30_000);
+    dbg("backend ready on port", port);
   }
 
-  const apiKey = (isDev && process.env.FUEGO_API_KEY) ? process.env.FUEGO_API_KEY : secrets.api_key;
+  const apiKey = isDev && process.env.FUEGO_API_KEY ? process.env.FUEGO_API_KEY : secrets.api_key;
 
   ipcMain.handle("app:launch-info", () => ({
     version: app.getVersion(),
@@ -188,6 +224,18 @@ app.whenReady().then(async () => {
   });
 });
 
+function cleanupBackend() {
+  if (backendProcess) {
+    try {
+      backendProcess.kill();
+    } catch {}
+    backendProcess = null;
+  }
+}
+
+app.on("will-quit", cleanupBackend);
+
 app.on("window-all-closed", () => {
+  cleanupBackend();
   app.quit();
 });

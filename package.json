@@ -5,6 +5,7 @@
     "node": ">=20.9.0"
   },
   "scripts": {
+    "start": "pnpm -C apps/desktop run start",
     "dev": "node scripts/dev.mjs",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
