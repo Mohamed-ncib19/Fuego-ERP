@@ -47,28 +47,24 @@ function run(name, color, label, args, cwd, env = {}) {
   return child;
 }
 
-function waitOnTcp(port, timeoutMs = 90_000) {
+async function waitOnTcp(port, timeoutMs = 90_000) {
   const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const attempt = () => {
-      const socket = net.connect({ port, host: "127.0.0.1", timeout: 800 });
-      const retry = () => {
-        socket.destroy();
-        if (Date.now() - started > timeoutMs) {
-          reject(new Error(`Timed out waiting for port ${port}`));
-        } else {
-          setTimeout(attempt, 700);
-        }
-      };
-      socket.on("connect", () => {
+  while (Date.now() - started < timeoutMs) {
+    const isUp = await new Promise((resolve) => {
+      const socket = net.connect({ port, host: "127.0.0.1" });
+      socket.once("connect", () => {
         socket.destroy();
         resolve(true);
       });
-      socket.on("error", retry);
-      socket.on("timeout", retry);
-    };
-    attempt();
-  });
+      socket.once("error", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+    if (isUp) return true;
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  throw new Error(`Timed out waiting for port ${port}`);
 }
 
 process.stdout.write(`
