@@ -43,7 +43,7 @@ describe("DbService boot-time schema (Phase 1)", () => {
       .map((row) => row.name);
 
     expect(names).toEqual(
-      expect.arrayContaining(["orders", "order_items", "order_events", "payments"]),
+      expect.arrayContaining(["orders", "order_items", "order_events", "payments", "expenses"]),
     );
   });
 

@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
+import express from "express";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { AppModule } from "./app.module";
@@ -42,6 +43,8 @@ export async function bootServer(options: BootOptions = {}): Promise<BootedServe
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.setGlobalPrefix("api");
 
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(cookieParser());
   // CSP stays off: the SPA is same-origin and its asset policy is controlled
   // by the build; enabling it is a Phase 3 hardening item (reference kept

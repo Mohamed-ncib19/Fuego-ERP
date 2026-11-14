@@ -12,6 +12,7 @@ import {
   Moon,
   Sun,
   Plus,
+  ShieldCheck,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@/hooks/use-auth-store";
@@ -22,7 +23,8 @@ import { Badge, Button } from "@/components/ui";
 const navItems = [
   { to: "/dashboard", label: "Tableau de bord", icon: LayoutDashboard, soon: false, admin: false },
   { to: "/commandes", label: "Commandes", icon: ClipboardList, soon: false, admin: false },
-  { to: "/finances", label: "Finances", icon: Wallet, soon: true, admin: false },
+  { to: "/finances", label: "Finances", icon: Wallet, soon: false, admin: false },
+  { to: "/audit", label: "Journal d'audit", icon: ShieldCheck, soon: false, admin: true },
   { to: "/settings/users", label: "Utilisateurs", icon: Users, soon: false, admin: true },
   { to: "/settings", label: "Paramètres", icon: SettingsIcon, soon: false, admin: true },
 ];

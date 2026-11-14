@@ -8,6 +8,8 @@ import { SetupModule } from "./setup/setup.module";
 import { SettingsModule } from "./settings/settings.module";
 import { HealthController } from "./health/health.controller";
 import { OrdersModule } from "./orders/orders.module";
+import { ExpensesModule } from "./expenses/expenses.module";
+import { FinanceModule } from "./finance/finance.module";
 import { ApiKeyGuard } from "./common/guards/api-key.guard";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
@@ -21,6 +23,8 @@ import { RolesGuard } from "./common/guards/roles.guard";
     SetupModule,
     SettingsModule,
     OrdersModule,
+    ExpensesModule,
+    FinanceModule,
   ],
   controllers: [HealthController],
   // Guard order = registration order: API key first (blocks non-app callers),

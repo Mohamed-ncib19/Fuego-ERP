@@ -28,7 +28,7 @@ export interface SafeUser {
 }
 
 // ---------------------------------------------------------------------------
-// Orders (Phase 1 vocabulary, locked here so both sides agree early)
+// Orders (Phase 1 vocabulary)
 // ---------------------------------------------------------------------------
 
 export type OrderType = "local" | "online";
@@ -110,11 +110,9 @@ export const ORDER_EVENT_LABELS: Record<OrderEventType, string> = {
 export interface OrderItem {
   id: string;
   order_id: string;
-  /** Display order, zero-based. */
   position: number;
   label: string;
   quantity: number;
-  /** Integer millimes. */
   unit_price: number;
 }
 
@@ -134,7 +132,6 @@ export interface Payment {
   id: string;
   order_id: string;
   kind: PaymentKind;
-  /** Integer millimes, always ≥ 1. */
   amount: number;
   note: string | null;
   recorded_by: string;
@@ -144,31 +141,25 @@ export interface Payment {
 
 /** Derived money block — integer millimes, never floats. */
 export interface OrderMoney {
-  /** Σ(quantity × unit_price). */
   total_amount: number;
   delivery_fee: number;
   grand_total: number;
   paid: number;
-  /** `grand_total − paid`, raw: negative means the client overpaid (credit). */
   reste: number;
 }
 
 /** The order row as returned on the wire (timestamps are ISO strings). */
 export interface Order {
   id: string;
-  /** `CMD-<year>-<4-digit seq>`, e.g. `CMD-2026-0007`. */
   ticket_no: string;
   ticket_year: number;
   ticket_seq: number;
-  /** Empty string for a draft saved before the customer was known. */
   customer_name: string;
   customer_phone: string | null;
   description: string | null;
   order_type: OrderType;
-  /** Required iff `order_type = "online"`. */
   delivery_address: string | null;
   status: OrderStatus;
-  /** `YYYY-MM-DD` promise date. */
   due_date: string | null;
   created_by: string;
   confirmed_by: string | null;
@@ -189,8 +180,103 @@ export interface OrderDetail extends Order, OrderMoney {
 }
 
 // ---------------------------------------------------------------------------
-// API envelope — every endpoint answers { data, meta, error } like the
-// reference system; clients unwrap through lib/api/client.ts.
+// Finance & Expenses (Phase 2 vocabulary)
+// ---------------------------------------------------------------------------
+
+export type ExpenseCategory =
+  | "materials"
+  | "rent"
+  | "salaries"
+  | "equipment"
+  | "marketing"
+  | "utilities"
+  | "other";
+
+export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
+  "materials",
+  "rent",
+  "salaries",
+  "equipment",
+  "marketing",
+  "utilities",
+  "other",
+];
+
+export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
+  materials: "Matières & Fournitures",
+  rent: "Loyer & Bail",
+  salaries: "Salaires & Rémunérations",
+  equipment: "Maintenance & Équipement",
+  marketing: "Publicité & Marketing",
+  utilities: "Électricité, Eau & Internet",
+  other: "Autres dépenses",
+};
+
+export interface Expense {
+  id: string;
+  category: ExpenseCategory;
+  amount: number; // millimes
+  note: string | null;
+  date: string; // YYYY-MM-DD
+  recorded_by: string;
+  recorded_by_label: string;
+  created_at: string;
+}
+
+export interface FinanceStats {
+  today: {
+    revenue: number;
+    expenses: number;
+    net_profit: number;
+    orders_count: number;
+    delivered_count: number;
+  };
+  overall: {
+    total_revenue: number;
+    total_expenses: number;
+    net_profit: number;
+    outstanding_balances: number; // money owed by clients on active orders
+    advances_held: number; // advances held on pending/confirmed/in_progress orders
+    total_orders: number;
+  };
+  status_breakdown: Record<OrderStatus, number>;
+  trend: {
+    date: string; // YYYY-MM-DD
+    revenue: number;
+    expenses: number;
+  }[];
+}
+
+// ---------------------------------------------------------------------------
+// Audit & Settings (Phase 0 / Phase 3)
+// ---------------------------------------------------------------------------
+
+export interface AuditLog {
+  id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  entity_label: string | null;
+  actor_id: string | null;
+  actor_label: string | null;
+  actor_role: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  prev_values: string | null;
+  new_values: string | null;
+  meta: string | null;
+  created_at: string;
+}
+
+export interface AppSettings {
+  id: string;
+  business_name: string;
+  currency: string;
+  ticket_footer: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// API envelope
 // ---------------------------------------------------------------------------
 
 export interface ApiEnvelope<T> {

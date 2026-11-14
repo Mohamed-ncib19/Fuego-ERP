@@ -15,7 +15,8 @@ import OrdersListPage from "@/pages/orders-list";
 import OrderFormPage from "@/pages/order-form";
 import OrderDetailPage from "@/pages/order-detail";
 import OrderTicketPage from "@/pages/order-ticket";
-import { FinancesPlaceholderPage } from "@/pages/placeholders";
+import FinancesPage from "@/pages/finances";
+import AuditPage from "@/pages/audit";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -117,7 +118,17 @@ function AppRoutes() {
         path="/finances"
         element={
           <RequireAuth>
-            <FinancesPlaceholderPage />
+            <FinancesPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/audit"
+        element={
+          <RequireAuth>
+            <RequireAdmin>
+              <AuditPage />
+            </RequireAdmin>
           </RequireAuth>
         }
       />

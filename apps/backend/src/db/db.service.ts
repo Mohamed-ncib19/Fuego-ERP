@@ -27,6 +27,32 @@ export class DbService {
     return this._raw!;
   }
 
+  getDbPath(): string {
+    return path.resolve(process.env.DB_PATH ?? "./data/fuego.db");
+  }
+
+  async backupTo(destPath: string): Promise<void> {
+    await this.raw.backup(destPath);
+  }
+
+  close(): void {
+    if (this._raw) {
+      try {
+        this._raw.close();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[db] error closing database:", err);
+      }
+      this._raw = undefined;
+      this._client = undefined;
+    }
+  }
+
+  reopen(): void {
+    this.close();
+    this.open();
+  }
+
   private open() {
     const dbPath = process.env.DB_PATH ?? "./data/fuego.db";
     mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
@@ -149,5 +175,19 @@ export function ensureTables(sqlite: Database.Database) {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS payments_order_id_idx ON payments (order_id);
+
+    CREATE TABLE IF NOT EXISTS expenses (
+      id TEXT PRIMARY KEY NOT NULL,
+      category TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      note TEXT,
+      date TEXT NOT NULL,
+      recorded_by TEXT NOT NULL,
+      recorded_by_label TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS expenses_category_idx ON expenses (category);
+    CREATE INDEX IF NOT EXISTS expenses_date_idx ON expenses (date);
+    CREATE INDEX IF NOT EXISTS expenses_created_at_idx ON expenses (created_at);
   `);
 }

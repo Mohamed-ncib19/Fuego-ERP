@@ -46,26 +46,23 @@ L'app Electron embarque l'API dans son processus principal, sert le SPA
 same-origin (cookies httpOnly), stocke la base et les secrets dans
 `%APPDATA%\@fuego\desktop\`.
 
-## Tests API (Phase 0 & Phase 1)
+## Tests API & Intégration
 
 Lancer le dev stack (`pnpm dev`) puis :
 
 ```bash
-pnpm test:api      # 34 vérifications : setup, login, users, rôles, audit…
-pnpm test:phase1   # Cycle complet commandes : brouillon, articles, avance, workflow, solde, livraison
-pnpm -C apps/backend test # Tests unitaires Vitest (20 tests)
+pnpm test:api        # 34 vérifications Phase 0 : setup, login, users, rôles, audit…
+pnpm test:phase1     # Cycle complet commandes : brouillon, articles, avance, workflow, solde, livraison
+pnpm test:phase2-3   # Vérification Phase 2 & 3 : finances, dépenses, encaissements, audit, sauvegarde & restauration
+pnpm test:all        # Suite complète (unitaires vitest + smoke phase 1 + smoke phase 2 & 3)
+pnpm -C apps/backend test # Tests unitaires Vitest (27 tests)
+pnpm run typecheck   # Vérification TypeScript stricte sur l'ensemble du monorepo
+pnpm run build       # Compilation complète de production (shared, backend, renderer, desktop)
 ```
 
-## Backend seul (tests API)
-
-```bash
-pnpm -C apps/backend run dev
-curl http://127.0.0.1:3220/api/health -H "x-api-key: fuego-dev-api-key"
-```
-
-## Étapes
+## Étapes & Livrables
 
 - **Phase 0** : login JWT, gestion des utilisateurs (admin), audit, assistant première installation. ✅ **Terminé**
 - **Phase 1** : commandes (articles, avance, confirmation, local/online, workflow, kanban, tickets A4 imprimables). ✅ **Terminé**
-- **Phase 2** : finances (revenus, dépenses, tableau de bord).
-- **Phase 3** : sauvegardes, packaging electron-builder, auto-update.
+- **Phase 2** : finances & charges (dépenses, journal des encaissements, tableau de bord KPIs en temps réel, rentabilité nette, tendance 14 jours, monnaie stricte en millimes). ✅ **Terminé**
+- **Phase 3** : finitions & maintenance (paramètres d'établissement, journal d'audit administratif, sauvegardes et restauration SQLite sécurisées, packaging prêt à l'emploi). ✅ **Terminé**

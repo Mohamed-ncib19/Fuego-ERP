@@ -190,3 +190,24 @@ export const payments = sqliteTable(
   },
   (table) => [index("payments_order_id_idx").on(table.order_id)],
 );
+
+/** Expenses (dépenses) — categorized outgoings with timestamps (Phase 2). */
+export const expenses = sqliteTable(
+  "expenses",
+  {
+    id: text("id").primaryKey().notNull(),
+    category: text("category").notNull(),
+    amount: integer("amount").notNull(),
+    note: text("note"),
+    date: text("date").notNull(), // YYYY-MM-DD
+    recorded_by: text("recorded_by").notNull(),
+    recorded_by_label: text("recorded_by_label").notNull(),
+    created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("expenses_category_idx").on(table.category),
+    index("expenses_date_idx").on(table.date),
+    index("expenses_created_at_idx").on(table.created_at),
+  ],
+);
+

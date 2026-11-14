@@ -103,3 +103,8 @@ export async function apiPatch<T>(url: string, body?: unknown): Promise<T> {
   const res = await http.patch<Envelope<T>>(url, body);
   return res.data.data as T;
 }
+
+export async function apiDelete<T>(url: string): Promise<T> {
+  const res = await http.delete<Envelope<T>>(url);
+  return res.data.data as T;
+}

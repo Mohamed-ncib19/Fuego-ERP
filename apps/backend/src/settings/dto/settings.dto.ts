@@ -12,3 +12,9 @@ export class UpdateSettingsDto {
   @MaxLength(200)
   ticket_footer?: string;
 }
+
+export class RestoreDbDto {
+  @IsString()
+  @MinLength(10, { message: "Données de sauvegarde invalides" })
+  fileBase64: string;
+}
