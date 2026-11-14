@@ -11,12 +11,46 @@
  *     origin or Vite in dev;
  *  4. expose apiKey/port/version to the renderer through the preload bridge.
  */
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import net from "node:net";
 import { fork, type ChildProcess } from "node:child_process";
+import { startAutoUpdate } from "./updater";
+
+// One data folder for every way of running the app (source checkout or the
+// installed build), so installing or updating never "loses" the database.
+// An explicit --user-data-dir (tests, a second isolated profile) still wins.
+if (!app.commandLine.hasSwitch("user-data-dir")) {
+  app.setPath("userData", path.join(app.getPath("appData"), "@fuego", "desktop"));
+}
+
+/**
+ * Where the backend bundle and the built UI live:
+ *  - installed app: next to the executable, in resources/ (electron-builder.yml)
+ *  - source checkout: the sibling workspace packages' build output
+ */
+function runtimePaths(): { backendScript: string; rendererDist: string } {
+  if (app.isPackaged) {
+    return {
+      backendScript: path.join(process.resourcesPath, "backend", "main.js"),
+      rendererDist: path.join(process.resourcesPath, "renderer"),
+    };
+  }
+  const apps = path.resolve(__dirname, "..", "..");
+  return {
+    backendScript: path.join(apps, "backend", "dist", "main.js"),
+    rendererDist: path.join(apps, "renderer", "dist"),
+  };
+}
+
+/** Boot log: in the data folder once installed, next to the sources otherwise. */
+function bootLogPath(): string {
+  return app.isPackaged
+    ? path.join(app.getPath("userData"), "debug-boot.log")
+    : path.join(__dirname, "..", "debug-boot.log");
+}
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL || process.env.FUEGO_EMBED_BACKEND === "0";
 
@@ -94,10 +128,7 @@ async function waitOnTcp(port: number, timeoutMs = 30_000): Promise<boolean> {
 // Boot diagnostics log
 function dbg(...args: unknown[]) {
   try {
-    fs.appendFileSync(
-      path.join(__dirname, "..", "debug-boot.log"),
-      `${new Date().toISOString()} ${args.join(" ")}\n`,
-    );
+    fs.appendFileSync(bootLogPath(), `${new Date().toISOString()} ${args.join(" ")}\n`);
   } catch {
     /* diagnostics must never crash the app */
   }
@@ -113,7 +144,7 @@ async function createWindow() {
     minHeight: 600,
     title: "Fuego",
     show: true,
-    backgroundColor: "#0b1021",
+    backgroundColor: "#18181b",
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -160,16 +191,36 @@ if (!gotLock) {
   process.exit(0);
 }
 
-app.whenReady().then(async () => {
+// A second launch (double-click on the shortcut) surfaces the existing window.
+app.on("second-instance", () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
+/**
+ * A failed boot must never leave a window-less process behind: it would keep
+ * the single-instance lock and every later launch would exit silently.
+ */
+function failBoot(err: unknown): void {
+  const message = String((err as Error)?.stack ?? err);
+  dbg("BOOT FAILED:", message);
+  cleanupBackend();
+  dialog.showErrorBox(
+    "Fuego — démarrage impossible",
+    `L'application n'a pas pu démarrer.
+
+${(err as Error)?.message ?? err}
+
+Détails : ${bootLogPath()}`,
+  );
+  app.exit(1);
+}
+
+async function boot(): Promise<void> {
   const secrets = loadOrCreateSecrets();
   dbg("secrets ready");
-
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
 
   let port = 3220;
   if (isDev) {
@@ -183,7 +234,15 @@ app.whenReady().then(async () => {
 
   if (!isDev) {
     // Standalone production: launch background backend process cleanly via fork
-    const backendScript = path.resolve(__dirname, "..", "..", "backend", "dist", "main.js");
+    const { backendScript, rendererDist } = runtimePaths();
+    for (const required of [backendScript, path.join(rendererDist, "index.html")]) {
+      if (!fs.existsSync(required)) {
+        const fix = app.isPackaged
+          ? "Réinstallez l'application."
+          : "Lancez « pnpm run build » puis réessayez.";
+        throw new Error(`Fichier manquant : ${required}\n${fix}`);
+      }
+    }
     dbg("Spawning backend child process:", backendScript);
 
     const env = {
@@ -193,7 +252,7 @@ app.whenReady().then(async () => {
       FUEGO_API_KEY: secrets.api_key,
       JWT_SECRET: secrets.jwt_secret,
       JWT_REFRESH_SECRET: secrets.jwt_refresh_secret,
-      RENDERER_DIST: path.resolve(__dirname, "..", "..", "renderer", "dist"),
+      RENDERER_DIST: rendererDist,
     };
 
     backendProcess = fork(backendScript, [], {
@@ -203,9 +262,17 @@ app.whenReady().then(async () => {
 
     backendProcess.stdout?.on("data", (d) => dbg("[api]", d.toString().trim()));
     backendProcess.stderr?.on("data", (d) => dbg("[api err]", d.toString().trim()));
-    backendProcess.on("exit", (code) => dbg("[api exit]", code));
+    // If the backend dies before it listens, fail now instead of waiting 30 s.
+    const died = new Promise<never>((_, reject) => {
+      backendProcess?.once("exit", (code) => {
+        dbg("[api exit]", code);
+        reject(new Error(`Le service interne s'est arrêté (code ${code}).`));
+      });
+      backendProcess?.once("error", reject);
+    });
+    died.catch(() => undefined); // after boot, an exit is handled by the quit path
 
-    await waitOnTcp(port, 30_000);
+    await Promise.race([waitOnTcp(port, 30_000), died]);
     dbg("backend ready on port", port);
   }
 
@@ -218,11 +285,14 @@ app.whenReady().then(async () => {
   }));
 
   await createWindow();
+  startAutoUpdate(() => mainWindow, dbg);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
-});
+}
+
+app.whenReady().then(boot).catch(failBoot);
 
 function cleanupBackend() {
   if (backendProcess) {

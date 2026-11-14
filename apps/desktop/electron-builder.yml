@@ -1,0 +1,51 @@
+# Installer + auto-update feed for the Windows desktop app.
+# Input is apps/desktop/bundle/, produced by `pnpm run bundle`
+# (scripts/bundle-app.mjs) — nothing is resolved from node_modules here.
+appId: tn.fuego.desktop
+productName: Fuego
+copyright: Fuego
+
+directories:
+  output: release
+
+extraMetadata:
+  main: bundle/main.js
+
+files:
+  - bundle/main.js
+  - bundle/preload.js
+  - package.json
+
+# Outside the asar archive: the backend is started as a separate process and
+# loads a native module, and the UI is served from disk by that backend.
+extraResources:
+  - from: bundle/resources/backend
+    to: backend
+  - from: bundle/resources/renderer
+    to: renderer
+
+npmRebuild: false
+nodeGypRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  # One click, per-user: no administrator rights needed to install or update.
+  oneClick: true
+  perMachine: false
+  artifactName: Fuego-Setup-${version}.${ext}
+  shortcutName: Fuego
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # Uninstalling must never delete the shop's database.
+  deleteAppDataOnUninstall: false
+
+# Where releases are published and where the installed app looks for updates.
+publish:
+  provider: github
+  owner: Mohamed-ncib19
+  repo: Fuego-ERP
+  releaseType: release

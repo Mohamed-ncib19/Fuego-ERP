@@ -1,0 +1,58 @@
+# Every push to `production` ships an update:
+#   build → test → Windows installer → GitHub release (installer + latest.yml).
+# Installed copies of Fuego read that release feed and update themselves.
+name: Release desktop app
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The version only ever goes up: 1.0.<run number>. No manual bump needed —
+      # the updater installs a release only when its version is higher.
+      - name: Set release version
+        shell: bash
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          node -e "const fs=require('fs');const p='apps/desktop/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.version=process.argv[1];fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')" "$VERSION"
+          echo "Releasing Fuego $VERSION"
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Unit tests
+        run: pnpm -C apps/backend test
+
+      - name: Bundle
+        run: pnpm -C apps/desktop run bundle
+
+      - name: Build installer and publish release
+        run: pnpm -C apps/desktop run release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
