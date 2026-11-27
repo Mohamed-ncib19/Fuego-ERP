@@ -15,6 +15,13 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(__dirname, "src") },
   },
+  // @fuego/shared is a linked workspace package compiled to CommonJS. Vite's
+  // dev server serves linked packages as raw ESM unless they are pre-bundled,
+  // and the browser then fails on named imports ("does not provide an export
+  // named …"), leaving a blank window. The production build is unaffected.
+  optimizeDeps: {
+    include: ["@fuego/shared"],
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,
