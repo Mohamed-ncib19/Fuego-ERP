@@ -2,8 +2,9 @@ import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/hooks/use-auth-store";
-import { useToastStore, ToastViewport } from "@/hooks/use-toast";
+import { ToastViewport } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui";
+import { AstryxProvider } from "@/components/astryx-provider";
 import LoginPage from "@/pages/login";
 import SetupPage from "@/pages/setup";
 import DashboardPage from "@/pages/dashboard";
@@ -17,7 +18,6 @@ import OrderTicketPage from "@/pages/order-ticket";
 import FinancesPage from "@/pages/finances";
 import AuditPage from "@/pages/audit";
 import StockPage from "@/pages/stock";
-import RawMaterialsPage from "@/pages/raw-materials";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -132,14 +132,8 @@ function AppRoutes() {
           </RequireAuth>
         }
       />
-      <Route
-        path="/stock/matieres"
-        element={
-          <RequireAuth>
-            <RawMaterialsPage />
-          </RequireAuth>
-        }
-      />
+      {/* The catalogue was merged into /stock. */}
+      <Route path="/stock/matieres" element={<Navigate to="/stock" replace />} />
       <Route
         path="/audit"
         element={
@@ -187,8 +181,11 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppRoutes />
-        <ToastViewport />
+        <AstryxProvider>
+          <ToastViewport>
+            <AppRoutes />
+          </ToastViewport>
+        </AstryxProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

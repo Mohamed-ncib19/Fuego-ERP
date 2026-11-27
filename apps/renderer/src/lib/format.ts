@@ -1,3 +1,4 @@
+import type { ISODateString } from "@astryxdesign/core/Calendar";
 import { QTY_SCALE, STOCK_UNIT_LABELS, stockLineTotal, type StockUnit, type UserRole } from "@fuego/shared";
 
 /** Stock quantity (thousandths of a unit) → "12,5 kg". */
@@ -35,11 +36,14 @@ export function parseMoney(input: string): number | null {
   return parseScaled(input);
 }
 
+/** A YYYY-MM-DD date, as Astryx DateInput types it. */
+export type IsoDate = ISODateString;
+
 /** Local calendar day as YYYY-MM-DD. */
-export function todayIso(): string {
+export function todayIso(): IsoDate {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` as IsoDate;
 }
 
 /** One idempotency key per opened form. */
@@ -83,3 +87,14 @@ export const roleLabel: Record<UserRole, string> = {
   super_admin: "Administrateur",
   staff: "Employé",
 };
+
+/** Stock thousandths → the plain number a NumberInput shows (2500 → 2.5). */
+export function toUnits(scaled: number): number {
+  return scaled / 1000;
+}
+
+/** NumberInput value → integer thousandths (2.5 → 2500); null stays null. */
+export function fromUnits(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
+  return Math.round(value * 1000);
+}

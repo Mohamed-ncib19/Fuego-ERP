@@ -12,6 +12,7 @@ import { StockService, type ExpenseLineInput, type ResolvedLine, type Tx } from 
 import { diffByItem, netByItem } from "../stock/stock.math";
 import { expenseLines, expenses, stockItems } from "../db/schema";
 import type { CreateExpenseDto, UpdateExpenseDto } from "./dto/expenses.dto";
+import type { CreateStockItemDto } from "../stock/dto/stock.dto";
 import {
   EXPENSE_CATEGORY_LABELS,
   STOCK_EXPENSE_CATEGORY,
@@ -19,6 +20,7 @@ import {
   type ExpenseCategory,
   type ExpenseLine,
   type PageMeta,
+  type StockItem,
   type StockUnit,
 } from "@fuego/shared";
 
@@ -64,41 +66,20 @@ export class ExpensesService {
           if (prior) return { id: prior.id, replay: true, resolved: [] as ResolvedLine[], amount: 0 };
         }
 
-        const resolved = this.stock.resolveExpenseLines(tx, lines as ExpenseLineInput[], actor, now);
-        const amount = resolved.length ? sumLines(resolved) : (dto.amount ?? 0);
-        if (amount < 1) throw new BadRequestException("Le montant total doit être supérieur à 0");
-
-        const id = randomUUID();
-        tx.insert(expenses)
-          .values({
-            id,
-            category: dto.category,
-            amount,
-            note: dto.note?.trim() || null,
-            date,
-            recorded_by: actor.id,
-            recorded_by_label: actor.full_name,
-            client_ref: clientRef,
-            created_at: now,
-            updated_at: now,
-          })
-          .run();
-
-        this.insertLines(tx, id, resolved);
-        this.stock.bookExpenseDeltas(
+        const booked = this.insertExpenseTx(
           tx,
-          netByItem(resolved),
           {
-            expenseId: id,
-            kind: "purchase",
+            category: dto.category,
+            amount: dto.amount,
+            note: dto.note,
             date,
-            reason: dto.note?.trim() || "Achat — dépense",
-            unitCosts: unitCosts(resolved),
+            lines: lines as ExpenseLineInput[],
+            clientRef,
           },
           actor,
           now,
         );
-        return { id, replay: false, resolved, amount };
+        return { ...booked, replay: false };
       },
       { behavior: "immediate" },
     );
@@ -317,6 +298,127 @@ export class ExpensesService {
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * Writes one expense, its lines and the matching stock entries inside the
+   * caller's transaction. Shared by `create` and `createMaterial` so both
+   * book purchases identically.
+   */
+  private insertExpenseTx(
+    tx: Tx,
+    input: {
+      category: ExpenseCategory;
+      amount?: number;
+      note?: string | null;
+      date: string;
+      lines: ExpenseLineInput[];
+      clientRef: string | null;
+    },
+    actor: Actor,
+    now: Date,
+  ): { id: string; resolved: ResolvedLine[]; amount: number } {
+    const resolved = this.stock.resolveExpenseLines(tx, input.lines, actor, now);
+    const amount = resolved.length ? sumLines(resolved) : (input.amount ?? 0);
+    if (amount < 1) throw new BadRequestException("Le montant total doit être supérieur à 0");
+    const note = input.note?.trim() || null;
+
+    const id = randomUUID();
+    tx.insert(expenses)
+      .values({
+        id,
+        category: input.category,
+        amount,
+        note,
+        date: input.date,
+        recorded_by: actor.id,
+        recorded_by_label: actor.full_name,
+        client_ref: input.clientRef,
+        created_at: now,
+        updated_at: now,
+      })
+      .run();
+
+    this.insertLines(tx, id, resolved);
+    this.stock.bookExpenseDeltas(
+      tx,
+      netByItem(resolved),
+      {
+        expenseId: id,
+        kind: "purchase",
+        date: input.date,
+        reason: note || "Achat — dépense",
+        unitCosts: unitCosts(resolved),
+      },
+      actor,
+      now,
+    );
+    return { id, resolved, amount };
+  }
+
+  /**
+   * Creates a stock item. With a starting quantity it is a purchase: the item,
+   * a "Matières & Fournitures" expense and the stock entry are written in one
+   * transaction. `already_owned` books the quantity as initial stock instead,
+   * with no expense, for stock the shop had before using Fuego.
+   */
+  async createMaterial(
+    dto: CreateStockItemDto,
+    actor: Actor,
+  ): Promise<{ item: StockItem; expense: Expense | null }> {
+    const qty = dto.initial_quantity ?? 0;
+    if (qty <= 0 || dto.already_owned) {
+      return { item: await this.stock.createItem(dto, actor), expense: null };
+    }
+    if (dto.unit_price === undefined || dto.unit_price < 1) {
+      throw new BadRequestException("Indiquez le prix d'achat unitaire (ou cochez « Stock déjà en ma possession »)");
+    }
+
+    const date = dto.purchase_date || new Date().toISOString().split("T")[0];
+    const now = new Date();
+    const result = this.db.client.transaction(
+      (tx) => {
+        const itemId = this.stock.insertItemTx(tx, dto, actor, now);
+        const booked = this.insertExpenseTx(
+          tx,
+          {
+            category: STOCK_EXPENSE_CATEGORY,
+            note: dto.supplier?.trim() || `Achat initial — ${dto.name.trim()}`,
+            date,
+            lines: [{ stock_item_id: itemId, quantity: qty, unit_price: dto.unit_price! }],
+            clientRef: null,
+          },
+          actor,
+          now,
+        );
+        return { itemId, ...booked };
+      },
+      { behavior: "immediate" },
+    );
+
+    const item = await this.stock.getItem(result.itemId);
+    void this.audit.record({
+      action: "stock_item.created",
+      entityType: "stock_item",
+      entityId: item.id,
+      entityLabel: item.name,
+      actorId: actor.id,
+      actorLabel: actor.full_name,
+      actorRole: actor.role,
+      newValues: { ...dto },
+      meta: { expense_id: result.id },
+    });
+    void this.audit.record({
+      action: "expense.created",
+      entityType: "expense",
+      entityId: result.id,
+      entityLabel: `${STOCK_EXPENSE_CATEGORY} - ${result.amount} millimes`,
+      actorId: actor.id,
+      actorLabel: actor.full_name,
+      actorRole: actor.role,
+      meta: { category: STOCK_EXPENSE_CATEGORY, amount: result.amount, date, lines: result.resolved.map(auditLine) },
+    });
+    return { item, expense: await this.get(result.id) };
+  }
 
   /** The stored expense, read through the transaction handle. */
   private readTx(tx: Tx, id: string): Expense {

@@ -48,6 +48,27 @@ export class CreateStockItemDto {
   @IsOptional()
   initial_quantity?: number;
 
+  /** Millimes per unit for the starting quantity — it becomes a dépense. */
+  @IsInt({ message: "Le prix doit être un entier en millimes" })
+  @Min(0, { message: "Le prix ne peut pas être négatif" })
+  @IsOptional()
+  unit_price?: number;
+
+  /** Starting quantity was owned before Fuego: initial stock, no dépense. */
+  @IsBoolean()
+  @IsOptional()
+  already_owned?: boolean;
+
+  @Matches(DATE_RE, { message: "Format de date invalide (YYYY-MM-DD)" })
+  @IsOptional()
+  purchase_date?: string;
+
+  /** Supplier / invoice note, used as the dépense note. */
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  supplier?: string;
+
   @IsString()
   @IsOptional()
   @MaxLength(500)

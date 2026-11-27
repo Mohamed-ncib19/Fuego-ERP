@@ -332,6 +332,45 @@ describe("StockService + ExpensesService integration", () => {
     expect(summary.value).toBeGreaterThan(0);
   });
 
+  // New material with a starting quantity → automatic dépense
+  it("creating a material with a quantity books a 'Matières & Fournitures' dépense atomically", async () => {
+    const before = (await expenses.list({ category: "materials" })).meta.total;
+    const { item, expense } = await expenses.createMaterial(
+      { name: "Toile de jute", unit: "m", initial_quantity: kg(12), unit_price: 4_000, supplier: "Souk El Blat" },
+      staff,
+    );
+    expect(item.quantity).toBe(kg(12));
+    expect(expense?.amount).toBe(48_000);
+    expect(expense?.category).toBe("materials");
+    expect(expense?.note).toBe("Souk El Blat");
+    expect(expense?.lines[0].stock_item_id).toBe(item.id);
+    expect((await expenses.list({ category: "materials" })).meta.total).toBe(before + 1);
+    const mv = await movementsOf(item.id);
+    expect(mv.map((m) => [m.kind, m.expense_id])).toEqual([["purchase", expense!.id]]);
+  });
+
+  it("already-owned starting stock creates no dépense", async () => {
+    const before = (await expenses.list({})).meta.total;
+    const { item, expense } = await expenses.createMaterial(
+      { name: "Fil doré", unit: "kg", initial_quantity: kg(2), already_owned: true },
+      staff,
+    );
+    expect(expense).toBeNull();
+    expect(item.quantity).toBe(kg(2));
+    expect((await movementsOf(item.id))[0].kind).toBe("initial");
+    expect((await expenses.list({})).meta.total).toBe(before);
+  });
+
+  it("a purchased starting quantity needs a price, and a failed purchase leaves no item behind", async () => {
+    await expect(
+      expenses.createMaterial({ name: "Perles", unit: "unit", initial_quantity: kg(50) }, staff),
+    ).rejects.toThrow(BadRequestException);
+    expect((await stock.listItems({ search: "perles", includeArchived: true })).data).toHaveLength(0);
+    await expect(
+      expenses.createMaterial({ name: "toile DE jute", unit: "m", initial_quantity: kg(1), unit_price: 1 }, staff),
+    ).rejects.toThrow(ConflictException);
+  });
+
   // 10 — existing permission rule holds for edits too
   it("keeps the owner-or-admin rule for editing expenses", async () => {
     const e = await expenses.create({ category: "rent", amount: 1_000 }, staff);

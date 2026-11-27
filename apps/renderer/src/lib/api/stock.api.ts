@@ -1,5 +1,6 @@
 import { apiGet, apiPatch, apiPost } from "./client";
 import type {
+  Expense,
   ManualMovementType,
   PageMeta,
   StockItem,
@@ -19,8 +20,18 @@ export interface StockItemPayload {
   unit: StockUnit;
   min_threshold?: number;
   initial_quantity?: number;
+  /** Millimes per unit: with a starting quantity the item is bought (a dépense is booked). */
+  unit_price?: number;
+  /** The starting quantity was already owned: initial stock, no dépense. */
+  already_owned?: boolean;
+  purchase_date?: string;
+  supplier?: string;
   note?: string;
 }
+
+export type StockItemUpdate = Partial<
+  Omit<StockItemPayload, "initial_quantity" | "unit_price" | "already_owned" | "purchase_date" | "supplier">
+>;
 
 export interface StockItemFilter {
   search?: string;
@@ -56,11 +67,12 @@ export const stockApi = {
     return apiGet<string[]>("/stock/categories").then((r) => r.data);
   },
 
-  createItem(payload: StockItemPayload): Promise<StockItem> {
-    return apiPost<StockItem>("/stock/items", payload);
+  /** The created item, and the dépense when its starting quantity was a purchase. */
+  createItem(payload: StockItemPayload): Promise<{ item: StockItem; expense: Expense | null }> {
+    return apiPost<{ item: StockItem; expense: Expense | null }>("/stock/items", payload);
   },
 
-  updateItem(id: string, payload: Partial<Omit<StockItemPayload, "initial_quantity">>): Promise<StockItem> {
+  updateItem(id: string, payload: StockItemUpdate): Promise<StockItem> {
     return apiPatch<StockItem>(`/stock/items/${id}`, payload);
   },
 

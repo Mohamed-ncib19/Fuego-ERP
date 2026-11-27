@@ -1,361 +1,435 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { AlertTriangle, ChevronLeft, ChevronRight, Package, PackageX, Plus, Search, Wallet } from "lucide-react";
+import { Boxes, Plus, Search, ShoppingCart } from "lucide-react";
+import { STOCK_UNIT_LABELS, stockNameKey, type StockItem, type StockLevel } from "@fuego/shared";
 import {
-  STOCK_ITEM_KINDS,
-  STOCK_ITEM_KIND_LABELS,
-  STOCK_MOVEMENT_KINDS,
-  STOCK_MOVEMENT_LABELS,
-  type StockItemKind,
-  type StockLevel,
-  type StockMovementKind,
-} from "@fuego/shared";
+  Table,
+  pixel,
+  proportional,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn,
+} from "@astryxdesign/core/Table";
+import { TabList, Tab } from "@astryxdesign/core/TabList";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Card } from "@astryxdesign/core/Card";
+import { Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Button as AxButton } from "@astryxdesign/core/Button";
+import { MoreMenu as AxMoreMenu } from "@astryxdesign/core/MoreMenu";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import {
-  Button,
-  Card,
-  EmptyState,
-  ErrorState,
-  Input,
-  Label,
-  SegmentedTabs,
-  Select,
-  Skeleton,
-  TableSkeleton,
-} from "@/components/ui";
-import { ItemsTable, sortItems, type ItemSort } from "@/components/stock/items-table";
-import { MovementsTable } from "@/components/stock/movements-list";
-import { useStockPanels } from "@/components/stock/stock-panels";
-import { useStockItems, useStockMovements } from "@/hooks/use-stock";
+import { Button, EmptyState, ErrorState, TableSkeleton } from "@/components/ui";
+import { StockGauge, StockLevelDot } from "@/components/stock/stock-level";
+import { MovementsTable } from "@/components/stock/movements-table";
+import { useStockActions } from "@/components/stock/stock-actions";
+import { useStockCategories, useStockItems, useStockMovements } from "@/hooks/use-stock";
 import { useAuthStore } from "@/hooks/use-auth-store";
-import { formatMillimes } from "@/lib/format";
+import { formatMillimes, formatQty } from "@/lib/format";
 
-type Tab = "inventory" | "movements";
+type View = "all" | "alert" | "archived";
+type Row = StockItem & Record<string, unknown>;
+
+/** Alerts first (out, then low), then by name. */
+const LEVEL_ORDER: Record<StockLevel, number> = { out: 0, low: 1, ok: 2 };
 
 /**
- * Gestion du stock — every item (materials, supplies, articles), its live
- * quantity and the ledger of movements behind it.
+ * Stock — the single screen for materials: what is in stock, what needs
+ * buying, and what happened. Buying goes through a dépense (one click from
+ * here), so finances and stock always agree.
  */
 export default function StockPage() {
-  const { user } = useAuthStore();
-  const isAdmin = user?.role === "super_admin";
-  const [tab, setTab] = useState<Tab>("inventory");
-  const { panels, openItem, openMove, openCreate } = useStockPanels({ isAdmin });
-
-  // Inventory filters
+  const isAdmin = useAuthStore((s) => s.user?.role === "super_admin");
+  const actions = useStockActions({ isAdmin });
+  const [tab, setTab] = useState<"items" | "history">("items");
+  const [view, setView] = useState<View>("all");
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<StockItemKind | "">("");
-  const [level, setLevel] = useState<StockLevel | "">("");
-  const [sort, setSort] = useState<ItemSort>("alert");
-  const [archived, setArchived] = useState(false);
+  const [category, setCategory] = useState<string | null>(null);
 
-  const itemsQ = useStockItems({
-    search: search || undefined,
-    kind: kind || undefined,
-    level: level || undefined,
-    include_archived: archived || undefined,
-  });
-  const items = useMemo(() => sortItems(itemsQ.data?.data ?? [], sort), [itemsQ.data, sort]);
+  const itemsQ = useStockItems({ include_archived: view === "archived" });
+  const { data: categories = [] } = useStockCategories();
   const summary = itemsQ.data?.summary;
-  const filtered = Boolean(search || kind || level || archived);
+  const alerts = summary ? summary.low + summary.out : 0;
 
-  // Movement filters
-  const [mKind, setMKind] = useState<StockMovementKind | "">("");
-  const [mFrom, setMFrom] = useState("");
-  const [mTo, setMTo] = useState("");
-  const [mPage, setMPage] = useState(1);
-  const movesQ = useStockMovements(
-    { kind: mKind || undefined, from: mFrom || undefined, to: mTo || undefined, page: mPage, limit: 25 },
-    tab === "movements",
-  );
+  const visible = useMemo(() => {
+    const all = itemsQ.data?.data ?? [];
+    const q = stockNameKey(search);
+    return all
+      .filter((i) => (view === "archived" ? !i.is_active : i.is_active))
+      .filter((i) => view !== "alert" || i.level !== "ok")
+      .filter((i) => !category || i.category === category)
+      .filter((i) => !q || stockNameKey(i.name).includes(q) || stockNameKey(i.category ?? "").includes(q))
+      .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || a.name.localeCompare(b.name, "fr"));
+  }, [itemsQ.data, view, search, category]);
 
-  const toggleLevel = (l: StockLevel) => {
-    setLevel((cur) => (cur === l ? "" : l));
-    setTab("inventory");
+  const { sortedData, sortConfig } = useTableSortableState<Row>({ data: visible as Row[] });
+  const sortPlugin = useTableSortable<Row>(sortConfig);
+  const filtered = search.trim() !== "" || category !== null || view !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setCategory(null);
+    setView("all");
   };
 
-  return (
-    <DashboardShell title="Gestion du stock" subtitle="Quantités disponibles, alertes et historique des mouvements">
-      {/* Summary — the low/out tiles double as filters. */}
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <SummaryTile
-          icon={<Package className="h-4 w-4" />}
-          label="Articles suivis"
-          value={summary?.total}
-          active={false}
-        />
-        <SummaryTile
-          icon={<AlertTriangle className="h-4 w-4" />}
-          label="Stock bas"
-          value={summary?.low}
-          tone="warning"
-          active={level === "low"}
-          onClick={() => toggleLevel("low")}
-        />
-        <SummaryTile
-          icon={<PackageX className="h-4 w-4" />}
-          label="En rupture"
-          value={summary?.out}
-          tone="danger"
-          active={level === "out"}
-          onClick={() => toggleLevel("out")}
-        />
-        <SummaryTile
-          icon={<Wallet className="h-4 w-4" />}
-          label="Valeur estimée"
-          value={summary ? formatMillimes(summary.value) : undefined}
-          hint="au dernier prix d'achat"
-          active={false}
-        />
-      </div>
-
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <SegmentedTabs<Tab>
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: "inventory", label: "Inventaire" },
-            { value: "movements", label: "Mouvements" },
-          ]}
-        />
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" />
-          Nouvel article
-        </Button>
-      </div>
-
-      {tab === "inventory" && (
-        <Card className="overflow-hidden">
-          <div className="grid grid-cols-1 gap-3 border-b border-border p-4 sm:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_1fr_auto]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-secondary" />
-              <Input
-                aria-label="Rechercher un article"
-                placeholder="Rechercher par nom ou catégorie…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select aria-label="Type" value={kind} onChange={(e) => setKind(e.target.value as StockItemKind | "")}>
-              <option value="">Tous les types</option>
-              {STOCK_ITEM_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {STOCK_ITEM_KIND_LABELS[k]}
-                </option>
-              ))}
-            </Select>
-            <Select aria-label="État" value={level} onChange={(e) => setLevel(e.target.value as StockLevel | "")}>
-              <option value="">Tous les états</option>
-              <option value="ok">Disponible</option>
-              <option value="low">Stock bas</option>
-              <option value="out">Rupture</option>
-            </Select>
-            <Select aria-label="Trier" value={sort} onChange={(e) => setSort(e.target.value as ItemSort)}>
-              <option value="alert">Alertes d'abord</option>
-              <option value="name">Nom (A → Z)</option>
-              <option value="quantity">Quantité croissante</option>
-              <option value="recent">Mouvement récent</option>
-            </Select>
-            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap text-sm text-text-secondary">
-              <input
-                type="checkbox"
-                checked={archived}
-                onChange={(e) => setArchived(e.target.checked)}
-                className="h-4 w-4 accent-[rgb(var(--color-primary-500))]"
-              />
-              Archivés
-            </label>
+  const columns = useMemo<TableColumn<Row>[]>(
+    () => [
+      {
+        key: "name",
+        header: "Article",
+        width: proportional(2),
+        sortable: true,
+        renderCell: (i) => (
+          <button
+            type="button"
+            onClick={() => actions.openItem(i)}
+            className="flex min-w-0 flex-col items-start text-left"
+          >
+            <span className="font-medium text-text-primary hover:underline">{i.name}</span>
+            {i.category && (
+              <Text type="supporting" color="secondary" maxLines={1}>
+                {i.category}
+              </Text>
+            )}
+          </button>
+        ),
+      },
+      {
+        key: "quantity",
+        header: "En stock",
+        width: proportional(2),
+        sortable: true,
+        renderCell: (i) => (
+          <div className="flex w-full max-w-[220px] flex-col gap-1.5">
+            <span className="font-semibold tabular-nums">{formatQty(i.quantity, i.unit)}</span>
+            <StockGauge item={i} />
           </div>
-
-          {itemsQ.isLoading ? (
-            <TableSkeleton rows={6} cols={5} />
-          ) : itemsQ.isError ? (
-            <ErrorState message={(itemsQ.error as Error).message} onRetry={() => itemsQ.refetch()} />
-          ) : items.length === 0 ? (
-            filtered ? (
-              <EmptyState
-                icon={<Search className="h-10 w-10" />}
-                title="Aucun article ne correspond"
-                description="Modifiez la recherche ou les filtres."
-                action={
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setSearch("");
-                      setKind("");
-                      setLevel("");
-                      setArchived(false);
-                    }}
-                  >
-                    Effacer les filtres
-                  </Button>
-                }
-              />
+        ),
+      },
+      {
+        key: "level",
+        header: "État",
+        width: pixel(150),
+        renderCell: (i) => <StockLevelDot level={i.level} />,
+      },
+      {
+        key: "last_unit_cost",
+        header: "Dernier prix",
+        width: pixel(150),
+        align: "end",
+        sortable: true,
+        renderCell: (i) =>
+          i.last_unit_cost === null ? (
+            <Text color="secondary">—</Text>
+          ) : (
+            <span className="tabular-nums">
+              {formatMillimes(i.last_unit_cost)}
+              <Text type="supporting" color="secondary">
+                {" "}
+                / {STOCK_UNIT_LABELS[i.unit]}
+              </Text>
+            </span>
+          ),
+      },
+      {
+        key: "actions",
+        header: "",
+        width: pixel(190),
+        align: "end",
+        renderCell: (i) => (
+          <div className="flex items-center justify-end gap-1">
+            {i.is_active ? (
+              <>
+                <AxButton
+                  label="Acheter"
+                  size="sm"
+                  variant="secondary"
+                  icon={<Icon icon={ShoppingCart} size="sm" />}
+                  onClick={() => actions.openBuy(i)}
+                />
+                <AxMoreMenu
+                  size="sm"
+                  label={`Actions pour ${i.name}`}
+                  alignment="end"
+                  items={[
+                    { label: "Utiliser (sortie)", onClick: () => actions.openMove(i, "exit") },
+                    { label: "Ajouter sans achat", onClick: () => actions.openMove(i, "entry") },
+                    {
+                      label: "Compter (inventaire)",
+                      isDisabled: !isAdmin,
+                      description: isAdmin ? undefined : "Réservé à l'administrateur",
+                      onClick: () => actions.openMove(i, "count"),
+                    },
+                    { type: "divider" },
+                    { label: "Voir le détail", onClick: () => actions.openItem(i) },
+                    { label: "Modifier", onClick: () => actions.openEdit(i) },
+                  ]}
+                />
+              </>
             ) : (
-              <EmptyState
-                icon={<Package className="h-10 w-10" />}
-                title="Le stock est vide"
-                description="Ajoutez un article ici, ou déclarez une dépense « Matières & Fournitures » : les matières achetées entrent automatiquement en stock."
-                action={
-                  <div className="flex flex-wrap justify-center gap-2">
-                    <Button onClick={openCreate}>
-                      <Plus className="h-4 w-4" />
-                      Ajouter un article
-                    </Button>
-                    <Link to="/finances">
-                      <Button variant="secondary">Déclarer une dépense</Button>
-                    </Link>
-                  </div>
-                }
-              />
-            )
-          ) : (
-            <ItemsTable items={items} onOpen={openItem} onMove={openMove} />
-          )}
-        </Card>
-      )}
-
-      {tab === "movements" && (
-        <Card className="overflow-hidden">
-          <div className="grid grid-cols-1 gap-3 border-b border-border p-4 sm:grid-cols-3">
-            <div>
-              <Label htmlFor="mv-kind">Type de mouvement</Label>
-              <Select
-                id="mv-kind"
-                value={mKind}
-                onChange={(e) => {
-                  setMKind(e.target.value as StockMovementKind | "");
-                  setMPage(1);
-                }}
-              >
-                <option value="">Tous</option>
-                {STOCK_MOVEMENT_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {STOCK_MOVEMENT_LABELS[k]}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="mv-from">Du</Label>
-              <Input
-                id="mv-from"
-                type="date"
-                value={mFrom}
-                onChange={(e) => {
-                  setMFrom(e.target.value);
-                  setMPage(1);
-                }}
-              />
-            </div>
-            <div>
-              <Label htmlFor="mv-to">Au</Label>
-              <Input
-                id="mv-to"
-                type="date"
-                value={mTo}
-                onChange={(e) => {
-                  setMTo(e.target.value);
-                  setMPage(1);
-                }}
-              />
-            </div>
+              <AxButton label="Voir" size="sm" variant="ghost" onClick={() => actions.openItem(i)} />
+            )}
           </div>
+        ),
+      },
+    ],
+    [actions, isAdmin],
+  );
 
-          {movesQ.isLoading ? (
-            <TableSkeleton rows={8} cols={6} />
-          ) : movesQ.isError ? (
-            <ErrorState message={(movesQ.error as Error).message} onRetry={() => movesQ.refetch()} />
-          ) : !movesQ.data || movesQ.data.data.length === 0 ? (
-            <EmptyState
-              icon={<Package className="h-10 w-10" />}
-              title="Aucun mouvement"
-              description="Achats, entrées, sorties et inventaires s'afficheront ici, du plus récent au plus ancien."
-            />
-          ) : (
-            <MovementsTable movements={movesQ.data.data} onOpenItem={openItem} />
-          )}
+  return (
+    <DashboardShell
+      title="Stock"
+      subtitle="Matières premières et fournitures"
+      actions={
+        <Button icon={<Plus className="h-4 w-4" />} onClick={actions.openCreate}>
+          Nouvelle matière
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-5">
+        {/* Three numbers that matter: how many, how many to buy, what it is worth. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <SummaryTile label="Articles suivis" value={summary ? String(summary.total) : "—"} />
+          <SummaryTile
+            label="À réapprovisionner"
+            value={summary ? String(alerts) : "—"}
+            tone={alerts > 0 ? "warning" : undefined}
+            hint={summary && summary.out > 0 ? `dont ${summary.out} en rupture` : undefined}
+          />
+          <SummaryTile
+            className="col-span-2 sm:col-span-1"
+            label="Valeur du stock"
+            value={summary ? formatMillimes(summary.value) : "—"}
+            hint="au dernier prix d'achat"
+          />
+        </div>
 
-          {movesQ.data && movesQ.data.meta.totalPages > 1 && (
-            <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-text-secondary">
-              <span>
-                Page {movesQ.data.meta.page} sur {movesQ.data.meta.totalPages} ({movesQ.data.meta.total} mouvements)
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  variant="secondary"
-                  className="p-1.5"
-                  aria-label="Page précédente"
-                  disabled={mPage <= 1}
-                  onClick={() => setMPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="p-1.5"
-                  aria-label="Page suivante"
-                  disabled={mPage >= movesQ.data.meta.totalPages}
-                  onClick={() => setMPage((p) => p + 1)}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+        <TabList value={tab} onChange={(v) => setTab(v as typeof tab)} hasDivider>
+          <Tab value="items" label="Articles" />
+          <Tab value="history" label="Historique des mouvements" />
+        </TabList>
+
+        {tab === "items" ? (
+          <>
+            {alerts > 0 && view === "all" && (
+              <Banner
+                status="warning"
+                title={`${alerts} article${alerts > 1 ? "s" : ""} à réapprovisionner`}
+                description={`${alerts > 1 ? "Ils ont" : "Il a"} atteint le seuil d'alerte. « Acheter » enregistre l'achat : la dépense et l'entrée en stock sont créées ensemble.`}
+                endContent={<AxButton label="Afficher" size="sm" onClick={() => setView("alert")} />}
+              />
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <SegmentedControl label="Filtrer les articles" value={view} onChange={(v) => setView(v as View)}>
+                <SegmentedControlItem value="all" label="Tous" />
+                <SegmentedControlItem
+                  value="alert"
+                  label={alerts > 0 ? `À réapprovisionner (${alerts})` : "À réapprovisionner"}
+                />
+                <SegmentedControlItem value="archived" label="Archivés" />
+              </SegmentedControl>
+              <div className="ml-auto flex w-full flex-wrap gap-3 sm:w-auto">
+                {categories.length > 0 && (
+                  <div className="min-w-0 flex-1 sm:w-[210px] sm:flex-none">
+                    <Selector
+                      label="Catégorie"
+                      isLabelHidden
+                      placeholder="Toutes les catégories"
+                      options={categories}
+                      value={category}
+                      onChange={setCategory}
+                      hasClear
+                      width="100%"
+                    />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 sm:w-[260px] sm:flex-none">
+                  <TextInput
+                    label="Rechercher un article"
+                    isLabelHidden
+                    type="search"
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Rechercher…"
+                    startIcon={<Icon icon={Search} size="sm" />}
+                    hasClear
+                    width="100%"
+                  />
+                </div>
               </div>
             </div>
-          )}
-        </Card>
-      )}
 
-      {panels}
+            <Card padding={0}>
+              {itemsQ.isLoading ? (
+                <TableSkeleton rows={5} cols={4} />
+              ) : itemsQ.isError ? (
+                <ErrorState
+                  message={(itemsQ.error as Error).message}
+                  onRetry={() => void itemsQ.refetch()}
+                />
+              ) : (summary?.total ?? 0) === 0 && view !== "archived" ? (
+                <EmptyState
+                  icon={<Boxes className="h-8 w-8" />}
+                  title="Aucune matière pour l'instant"
+                  description="Ajoutez vos matières premières et fournitures. Leur achat crée automatiquement la dépense et l'entrée en stock."
+                  action={
+                    <Button icon={<Plus className="h-4 w-4" />} onClick={actions.openCreate}>
+                      Nouvelle matière
+                    </Button>
+                  }
+                />
+              ) : visible.length === 0 ? (
+                <EmptyState
+                  title={view === "archived" ? "Aucun article archivé" : "Aucun article ne correspond"}
+                  description={
+                    view === "alert" && !search && !category
+                      ? "Tout est au-dessus du seuil d'alerte."
+                      : undefined
+                  }
+                  action={
+                    filtered ? (
+                      <Button variant="secondary" onClick={clearFilters}>
+                        Effacer les filtres
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <>
+                  {/* Table from md; a tappable list on phones. */}
+                  <div className="hidden overflow-x-auto md:block">
+                    <Table<Row>
+                      data={sortedData}
+                      columns={columns}
+                      idKey="id"
+                      hasHover
+                      verticalAlign="middle"
+                      plugins={{ sort: sortPlugin }}
+                    />
+                  </div>
+                  <ul className="divide-y divide-border md:hidden">
+                    {visible.map((i) => (
+                      <li key={i.id}>
+                        <button
+                          type="button"
+                          onClick={() => actions.openItem(i)}
+                          className="flex w-full flex-col gap-2 px-4 py-3 text-left"
+                        >
+                          <span className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate font-medium">{i.name}</span>
+                            <span className="shrink-0 font-semibold tabular-nums">
+                              {formatQty(i.quantity, i.unit)}
+                            </span>
+                          </span>
+                          <StockGauge item={i} />
+                          <StockLevelDot level={i.level} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </Card>
+          </>
+        ) : (
+          <HistoryTab onOpenItem={actions.openItem} />
+        )}
+      </div>
+      {actions.overlays}
     </DashboardShell>
   );
 }
 
 function SummaryTile({
-  icon,
   label,
   value,
   hint,
   tone,
-  active,
-  onClick,
+  className,
 }: {
-  icon: React.ReactNode;
+  className?: string;
   label: string;
-  value: number | string | undefined;
+  value: string;
   hint?: string;
-  tone?: "warning" | "danger";
-  active: boolean;
-  onClick?: () => void;
+  tone?: "warning";
 }) {
-  const hot = tone && typeof value === "number" && value > 0;
-  const toneText = tone === "warning" ? "text-warning" : tone === "danger" ? "text-danger" : "text-text-primary";
-  const body = (
-    <>
-      <div className="flex items-center justify-between text-text-secondary">
-        <span className="text-xs font-medium">{label}</span>
-        <span className={hot ? toneText : ""}>{icon}</span>
-      </div>
-      {value === undefined ? (
-        <Skeleton className="mt-2 h-7 w-16" />
-      ) : (
-        <p className={`mt-1.5 text-2xl font-bold tabular-nums ${hot ? toneText : "text-text-primary"}`}>{value}</p>
+  return (
+    <Card padding={4} className={className}>
+      <Text type="supporting" color="secondary" display="block">
+        {label}
+      </Text>
+      <span
+        className={`mt-1 block text-[26px] font-semibold leading-tight tabular-nums ${tone === "warning" ? "text-warning" : ""}`}
+      >
+        {value}
+      </span>
+      {hint && (
+        <Text type="supporting" color="secondary" display="block">
+          {hint}
+        </Text>
       )}
-      {hint && <p className="text-[11px] text-text-secondary">{hint}</p>}
-      {onClick && hot && (
-        <p className="mt-0.5 text-[11px] text-text-secondary">{active ? "Filtre actif — cliquer pour retirer" : "Voir la liste"}</p>
-      )}
-    </>
+    </Card>
   );
-  const cls = `rounded-card border bg-surface p-4 text-left shadow-card transition-colors ${
-    active ? (tone === "danger" ? "border-danger/60" : "border-warning/60") : "border-border"
-  }`;
-  return onClick ? (
-    <button onClick={onClick} aria-pressed={active} className={`${cls} hover:bg-surface-2/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}>
-      {body}
-    </button>
-  ) : (
-    <div className={cls}>{body}</div>
+}
+
+const KIND_FILTERS = [
+  { value: "purchase", label: "Achats" },
+  { value: "exit", label: "Sorties" },
+  { value: "entry", label: "Entrées sans achat" },
+  { value: "adjustment", label: "Inventaires" },
+  { value: "initial", label: "Stock initial" },
+  { value: "purchase_correction", label: "Corrections d'achat" },
+  { value: "purchase_reversal", label: "Achats annulés" },
+];
+
+function HistoryTab({ onOpenItem }: { onOpenItem: (id: string) => void }) {
+  const [kind, setKind] = useState<string | null>(null);
+  const [limit, setLimit] = useState(50);
+  const q = useStockMovements({
+    kind: (kind ?? undefined) as Parameters<typeof useStockMovements>[0]["kind"],
+    limit,
+  });
+  const total = q.data?.meta.total ?? 0;
+  const rows = q.data?.data ?? [];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Text color="secondary">
+          {q.data ? `${total} mouvement${total > 1 ? "s" : ""}` : "Chargement…"}
+        </Text>
+        <Selector
+          label="Type de mouvement"
+          isLabelHidden
+          placeholder="Tous les mouvements"
+          options={KIND_FILTERS}
+          value={kind}
+          onChange={setKind}
+          hasClear
+          width={240}
+        />
+      </div>
+      <Card padding={0}>
+        {q.isLoading ? (
+          <TableSkeleton rows={6} cols={5} />
+        ) : q.isError ? (
+          <ErrorState message={(q.error as Error).message} onRetry={() => void q.refetch()} />
+        ) : (
+          <MovementsTable
+            movements={rows}
+            onOpenItem={onOpenItem}
+            emptyTitle={kind ? "Aucun mouvement de ce type" : "Aucun mouvement pour l'instant"}
+          />
+        )}
+      </Card>
+      {rows.length < total && (
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={() => setLimit((l) => l + 50)} loading={q.isFetching}>
+            Afficher plus
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

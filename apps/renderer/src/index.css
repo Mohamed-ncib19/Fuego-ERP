@@ -1,66 +1,118 @@
+/* ---------------------------------------------------------------------------
+ * Astryx design system: reset → component styles → neutral theme tokens →
+ * Fuego's own token overrides. The layer order is declared first so it holds
+ * whatever order the imports resolve in. Tailwind utilities stay unlayered and
+ * therefore sit above every layer: use them for layout, not to restyle
+ * Astryx components.
+ * ------------------------------------------------------------------------- */
+@layer reset, astryx-base, astryx-theme, fuego;
+
+@import "@astryxdesign/theme-neutral/fonts.css";
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+
+/* Preflight is off (Astryx reset owns that); base now only emits the --tw-* defaults that transform, ring and shadow utilities need. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ---------------------------------------------------------------------------
- * Design tokens — dark grey surfaces with a gold accent. Dark only: there is
- * no light theme, so a single :root block holds every value.
+ * Fuego brand on top of Astryx Neutral: the app is dark only and keeps its
+ * gold as the accent (primary buttons, selection, focus, links).
  * ------------------------------------------------------------------------- */
-:root {
-  color-scheme: dark;
+@layer fuego {
+  [data-astryx-theme="neutral"] {
+    --color-accent: #d4af37;
+    --color-accent-muted: #d4af3729;
+    --color-on-accent: #17150f;
+    --color-text-accent: #e0bd4c;
+    --color-icon-accent: #e0bd4c;
 
-  /* gold scale */
-  --color-primary-50: 253 248 230;
-  --color-primary-100: 250 239 196;
-  --color-primary-200: 245 224 150;
-  --color-primary-300: 236 205 105;
-  --color-primary-400: 224 189 76;
-  --color-primary-500: 212 175 55;
-  --color-primary-600: 184 148 40;
-  --color-primary-700: 148 117 31;
-  --color-primary-800: 115 90 26;
-  --color-primary-900: 84 66 21;
-  --color-primary-950: 46 36 10;
+    /* Gold scale for the few places that need a tint (rgb triplets so the
+       Tailwind `primary-*` classes keep their opacity modifiers). */
+    --fuego-gold-50: 253 248 230;
+    --fuego-gold-100: 250 239 196;
+    --fuego-gold-200: 245 224 150;
+    --fuego-gold-300: 236 205 105;
+    --fuego-gold-400: 224 189 76;
+    --fuego-gold-500: 212 175 55;
+    --fuego-gold-600: 184 148 40;
+    --fuego-gold-700: 148 117 31;
+    --fuego-gold-800: 115 90 26;
+    --fuego-gold-900: 84 66 21;
+    --fuego-gold-950: 46 36 10;
+  }
 
-  /* neutral dark greys */
-  --color-surface: 34 34 38;
-  --color-surface-2: 24 24 27;
-  --color-border: 60 60 66;
+  /* Astryx's reset paints borders currentColor; Fuego's markup expects the
+     theme border colour when only a width class is given. */
+  :where(*),
+  :where(*)::before,
+  :where(*)::after {
+    border-color: var(--color-border);
+  }
 
-  --color-text-primary: 236 236 232;
-  --color-text-secondary: 161 161 170;
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-  --color-success: 74 190 120;
-  --color-warning: 240 170 60;
-  --color-danger: 240 110 110;
-  --color-info: 120 170 240;
-}
+  body {
+    background: var(--color-background-body);
+    color: var(--color-text-primary);
+    font-family: var(--font-family-body);
+  }
 
-html,
-body,
-#root {
-  height: 100%;
-}
+  /* Thin scrollbars for the desktop feel */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-emphasized);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 
-body {
-  @apply bg-surface-2 text-text-primary antialiased;
-  font-family:
-    "Segoe UI",
-    system-ui,
-    -apple-system,
-    sans-serif;
-}
-
-/* Thin scrollbars for the desktop feel */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-border rounded-full;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
+  /* Native fields that stay on react-hook-form get the Astryx field look. */
+  .fuego-field {
+    display: block;
+    width: 100%;
+    min-height: 32px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-element);
+    background: var(--color-background-surface);
+    color: var(--color-text-primary);
+    padding: 0 12px;
+    font-size: 14px;
+    transition:
+      border-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+  textarea.fuego-field {
+    padding: 8px 12px;
+  }
+  .fuego-field:hover:not(:disabled) {
+    border-color: var(--color-text-secondary);
+  }
+  .fuego-field:focus,
+  .fuego-field:focus-within {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-muted);
+  }
+  .fuego-field[aria-invalid="true"] {
+    border-color: var(--color-error);
+  }
+  .fuego-field[aria-invalid="true"]:focus {
+    box-shadow: 0 0 0 3px var(--color-error-muted);
+  }
+  .fuego-field:disabled {
+    opacity: 0.6;
+  }
 }
 
 @keyframes toast-in {
@@ -71,28 +123,6 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes drawer-in {
-  from {
-    opacity: 0;
-    transform: translateX(24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes nav-in {
-  from {
-    opacity: 0;
-    transform: translateX(-24px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 

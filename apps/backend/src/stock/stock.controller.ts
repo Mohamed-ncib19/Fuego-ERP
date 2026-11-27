@@ -4,14 +4,14 @@ import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { StockService, type Actor } from "./stock.service";
 import {
-  CreateStockItemDto,
   RecordMovementDto,
   SetActiveDto,
   UpdateStockItemDto,
 } from "./dto/stock.dto";
 
 /**
- * Stock endpoints. Every signed-in user can look at the stock, create and
+ * Stock endpoints (item creation is in expenses/stock-items.controller.ts,
+ * because a starting quantity books a dépense). Every signed-in user can look at the stock, create and
  * edit items, and record entries/exits (the counter staff receives and uses
  * materials). Archiving and inventory corrections are admin-only.
  */
@@ -45,11 +45,6 @@ export class StockController {
   @Get("items/:id")
   async getItem(@Param("id") id: string) {
     return this.stock.getItem(id);
-  }
-
-  @Post("items")
-  async createItem(@Body() dto: CreateStockItemDto, @CurrentUser() actor: Actor) {
-    return this.stock.createItem(dto, actor);
   }
 
   @Patch("items/:id")

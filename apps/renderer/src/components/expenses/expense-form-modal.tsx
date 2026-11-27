@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Info, PackagePlus, Trash2 } from "lucide-react";
+import { PackagePlus, Trash2 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import {
   EXPENSE_CATEGORIES,
@@ -11,9 +11,16 @@ import {
   stockNameKey,
   type Expense,
   type ExpenseCategory,
+  type StockItem,
   type StockUnit,
 } from "@fuego/shared";
-import { Button, FieldError, Input, Label, Modal, Select } from "@/components/ui";
+import { Selector } from "@astryxdesign/core/Selector";
+import { DateInput } from "@astryxdesign/core/DateInput";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Banner } from "@astryxdesign/core/Banner";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Button, FieldError, Input, Modal } from "@/components/ui";
 import { expensesApi, type ExpenseLinePayload } from "@/lib/api/finance.api";
 import { useInvalidateStock, useStockItems } from "@/hooks/use-stock";
 import { useToast } from "@/hooks/use-toast";
@@ -26,6 +33,7 @@ import {
   parseScaled,
   scaledToInput,
   todayIso,
+  type IsoDate,
 } from "@/lib/format";
 import { MaterialPicker } from "./material-picker";
 
@@ -61,11 +69,14 @@ export function ExpenseFormModal({
   open,
   onClose,
   expense,
+  presetItem,
 }: {
   open: boolean;
   onClose: () => void;
   /** Edit mode when set. */
   expense?: Expense | null;
+  /** New purchase of this material ("Acheter" from the stock screen). */
+  presetItem?: StockItem | null;
 }) {
   const toast = useToast();
   const invalidate = useInvalidateStock();
@@ -74,7 +85,7 @@ export function ExpenseFormModal({
   const [category, setCategory] = useState<ExpenseCategory>(STOCK_EXPENSE_CATEGORY);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [date, setDate] = useState(todayIso());
+  const [date, setDate] = useState<string>(todayIso());
   const [lines, setLines] = useState<LineDraft[]>([]);
   const [clientRef, setClientRef] = useState(newClientRef());
   const [errors, setErrors] = useState<{ amount?: string; lines?: Record<string, LineErrors>; form?: string }>({});
@@ -109,9 +120,19 @@ export function ExpenseFormModal({
       setAmount("");
       setNote("");
       setDate(todayIso());
-      setLines([blankLine()]);
+      setLines([
+        presetItem
+          ? {
+              ...blankLine(),
+              itemId: presetItem.id,
+              unit: presetItem.unit,
+              query: presetItem.name,
+              price: presetItem.last_unit_cost !== null ? scaledToInput(presetItem.last_unit_cost) : "",
+            }
+          : blankLine(),
+      ]);
     }
-  }, [open, expense]);
+  }, [open, expense, presetItem]);
 
   const patchLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -220,10 +241,21 @@ export function ExpenseFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={editing ? "Modifier la dépense" : "Déclarer une dépense"}
+      title={editing ? "Modifier la dépense" : presetItem ? `Acheter : ${presetItem.name}` : "Déclarer une dépense"}
       width={isMaterials ? "max-w-3xl" : "max-w-md"}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button type="submit" form="expense-form" loading={mutation.isPending}>
+            {editing ? "Enregistrer les modifications" : sendLines ? `Enregistrer · ${formatMillimes(linesTotal)}` : "Enregistrer"}
+          </Button>
+        </>
+      }
     >
       <form
+        id="expense-form"
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
@@ -231,29 +263,33 @@ export function ExpenseFormModal({
         }}
       >
         <div className={`grid grid-cols-1 gap-4 ${isMaterials ? "sm:grid-cols-[2fr_1fr]" : ""}`}>
-          <div>
-            <Label htmlFor="exp-cat">Catégorie</Label>
-            <Select id="exp-cat" value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>
-              {EXPENSE_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {EXPENSE_CATEGORY_LABELS[c]}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="exp-date">Date</Label>
-            <Input id="exp-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
+          <Selector
+            label="Catégorie"
+            options={EXPENSE_CATEGORIES.map((c) => ({ value: c, label: EXPENSE_CATEGORY_LABELS[c] }))}
+            value={category}
+            onChange={(v) => v && setCategory(v as ExpenseCategory)}
+            width="100%"
+          />
+          <DateInput
+            label="Date"
+            value={date as IsoDate}
+            onChange={(v) => setDate(v ?? todayIso())}
+            max={todayIso()}
+            format="date"
+            width="100%"
+          />
         </div>
 
         {droppedLines > 0 && (
-          <p className="flex items-start gap-2 rounded-btn border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            {editing
-              ? `Cette catégorie n'alimente pas le stock : ${droppedLines} matière(s) seront retirées du stock à l'enregistrement.`
-              : `Cette catégorie n'alimente pas le stock : les ${droppedLines} matière(s) saisies ne seront pas enregistrées.`}
-          </p>
+          <Banner
+            status="warning"
+            title="Cette catégorie n'alimente pas le stock"
+            description={
+              editing
+                ? `${droppedLines} matière(s) seront retirées du stock à l'enregistrement.`
+                : `Les ${droppedLines} matière(s) saisies ne seront pas enregistrées.`
+            }
+          />
         )}
 
         {isMaterials && (
@@ -263,9 +299,9 @@ export function ExpenseFormModal({
                 <h3 className="text-sm font-semibold text-text-primary">Matières achetées</h3>
                 <p className="text-xs text-text-secondary">Ajoutées automatiquement au stock à l'enregistrement.</p>
               </div>
-              <Button type="button" variant="secondary" className="shrink-0 px-3 py-1.5" onClick={() => setLines((ls) => [...ls, blankLine()])}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setLines((ls) => [...ls, blankLine()])}>
                 <PackagePlus className="h-4 w-4" />
-                <span className="hidden sm:inline">Ajouter une ligne</span>
+                Ajouter une ligne
               </Button>
             </header>
 
@@ -366,15 +402,14 @@ export function ExpenseFormModal({
                       </span>
                     </div>
                     <div className="flex justify-end sm:pt-1">
-                      <button
-                        type="button"
+                      <IconButton
+                        label={`Retirer la ligne ${idx + 1}`}
+                        tooltip="Retirer la ligne"
+                        variant="ghost"
+                        size="sm"
+                        icon={<Icon icon={Trash2} size="sm" />}
                         onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
-                        className="rounded-btn p-1.5 text-text-secondary transition-colors hover:bg-danger/10 hover:text-danger"
-                        aria-label={`Retirer la ligne ${idx + 1}`}
-                        title="Retirer la ligne"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      />
                     </div>
                   </li>
                 );
@@ -397,48 +432,29 @@ export function ExpenseFormModal({
         )}
 
         {!sendLines && (
-          <div>
-            <Label htmlFor="exp-amount">Montant (DT)</Label>
-            <Input
-              id="exp-amount"
-              inputMode="decimal"
-              placeholder="Ex : 25,500"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              invalid={Boolean(errors.amount)}
-              autoFocus={!isMaterials}
-              className="tabular-nums"
-            />
-            <FieldError message={errors.amount} />
-            <p className="mt-1 text-xs text-text-secondary">Jusqu'à 3 décimales (ex : 12,500 DT).</p>
-          </div>
+          <TextInput
+            label="Montant (DT)"
+            description="Jusqu'à 3 décimales (ex : 12,500)."
+            inputMode="decimal"
+            placeholder="25,500"
+            value={amount}
+            onChange={setAmount}
+            isRequired
+            hasAutoFocus={!isMaterials}
+            status={errors.amount ? { type: "error", message: errors.amount } : undefined}
+          />
         )}
         {sendLines && <FieldError message={errors.amount} />}
 
-        <div>
-          <Label htmlFor="exp-note">{isMaterials ? "Fournisseur / note (optionnel)" : "Description / justificatif (optionnel)"}</Label>
-          <Input
-            id="exp-note"
-            placeholder={isMaterials ? "Ex : Fournisseur, n° de facture" : "Ex : Facture STEG novembre"}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
+        <TextInput
+          label={isMaterials ? "Fournisseur / facture" : "Description / justificatif"}
+          isOptional
+          placeholder={isMaterials ? "Ex : Fournisseur, n° de facture" : "Ex : Facture STEG novembre"}
+          value={note}
+          onChange={setNote}
+        />
 
-        {errors.form && (
-          <p role="alert" className="rounded-btn border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
-            {errors.form}
-          </p>
-        )}
-
-        <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Annuler
-          </Button>
-          <Button type="submit" loading={mutation.isPending}>
-            {editing ? "Enregistrer les modifications" : sendLines ? `Enregistrer · ${formatMillimes(linesTotal)}` : "Enregistrer"}
-          </Button>
-        </div>
+        {errors.form && <Banner status="error" title={errors.form} />}
       </form>
     </Modal>
   );

@@ -1,3 +1,4 @@
+import { DateInput } from "@astryxdesign/core/DateInput";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ import {
   PageLoader,
 } from "@/components/ui";
 import { ordersApi, type CreateOrderItemInput } from "@/lib/api/orders.api";
-import { formatMillimes } from "@/lib/format";
+import { formatMillimes, type IsoDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { isValidPhone, normalizePhone, type OrderType } from "@fuego/shared";
 
@@ -321,14 +322,14 @@ export default function OrderFormPage() {
               </>
             )}
 
-            <div>
-              <Label>Date promise (Livraison prévue)</Label>
-              <Input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
-            </div>
+            <DateInput
+              label="Date promise (Livraison prévue)"
+              value={(dueDate || undefined) as IsoDate | undefined}
+              onChange={(v) => setDueDate((v ?? ""))}
+              format="date"
+              hasClear
+              width="100%"
+            />
           </Card>
         </div>
 

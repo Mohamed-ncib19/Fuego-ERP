@@ -1,3 +1,4 @@
+import { DateInput } from "@astryxdesign/core/DateInput";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -23,7 +24,7 @@ import { financeApi, expensesApi, type PaymentReceiptRow } from "@/lib/api/finan
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { ExpenseFormModal } from "@/components/expenses/expense-form-modal";
 import { useToast } from "@/hooks/use-toast";
-import { formatMillimes, formatDate, formatDateTime, formatQty } from "@/lib/format";
+import { formatMillimes, formatDate, formatDateTime, formatQty, type IsoDate } from "@/lib/format";
 import {
   Button,
   Card,
@@ -365,7 +366,7 @@ export default function FinancesPage() {
                       </div>
 
                       {/* Bar Pair */}
-                      <div className="flex w-full items-end justify-center gap-1">
+                      <div className="flex min-h-0 w-full flex-1 items-end justify-center gap-1">
                         <div
                           style={{ height: `${day.revenue > 0 ? revHeight : 4}%` }}
                           className={`w-1/2 rounded-t transition-all ${
@@ -413,29 +414,29 @@ export default function FinancesPage() {
                 </Select>
               </div>
 
-              <div>
-                <Label>Date de début</Label>
-                <Input
-                  type="date"
-                  value={expenseFrom}
-                  onChange={(e) => {
-                    setExpenseFrom(e.target.value);
+              <DateInput
+                label="Date de début"
+                value={(expenseFrom || undefined) as IsoDate | undefined}
+                onChange={(v) => {
+                    setExpenseFrom((v ?? ""));
                     setExpensePage(1);
                   }}
-                />
-              </div>
+                format="date"
+                hasClear
+                width="100%"
+              />
 
-              <div>
-                <Label>Date de fin</Label>
-                <Input
-                  type="date"
-                  value={expenseTo}
-                  onChange={(e) => {
-                    setExpenseTo(e.target.value);
+              <DateInput
+                label="Date de fin"
+                value={(expenseTo || undefined) as IsoDate | undefined}
+                onChange={(v) => {
+                    setExpenseTo((v ?? ""));
                     setExpensePage(1);
                   }}
-                />
-              </div>
+                format="date"
+                hasClear
+                width="100%"
+              />
 
               <div className="flex flex-col justify-end">
                 <div className="rounded-md border border-border bg-surface-2 p-2 text-right">
@@ -594,29 +595,29 @@ export default function FinancesPage() {
                 </Select>
               </div>
 
-              <div>
-                <Label>Date de début</Label>
-                <Input
-                  type="date"
-                  value={paymentFrom}
-                  onChange={(e) => {
-                    setPaymentFrom(e.target.value);
+              <DateInput
+                label="Date de début"
+                value={(paymentFrom || undefined) as IsoDate | undefined}
+                onChange={(v) => {
+                    setPaymentFrom((v ?? ""));
                     setPaymentPage(1);
                   }}
-                />
-              </div>
+                format="date"
+                hasClear
+                width="100%"
+              />
 
-              <div>
-                <Label>Date de fin</Label>
-                <Input
-                  type="date"
-                  value={paymentTo}
-                  onChange={(e) => {
-                    setPaymentTo(e.target.value);
+              <DateInput
+                label="Date de fin"
+                value={(paymentTo || undefined) as IsoDate | undefined}
+                onChange={(v) => {
+                    setPaymentTo((v ?? ""));
                     setPaymentPage(1);
                   }}
-                />
-              </div>
+                format="date"
+                hasClear
+                width="100%"
+              />
 
               <div className="flex flex-col justify-end">
                 <div className="rounded-md border border-border bg-surface-2 p-2 text-right">
