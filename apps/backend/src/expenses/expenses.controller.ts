@@ -4,12 +4,13 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
 } from "@nestjs/common";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ExpensesService } from "./expenses.service";
-import { CreateExpenseDto } from "./dto/expenses.dto";
+import { CreateExpenseDto, UpdateExpenseDto } from "./dto/expenses.dto";
 
 interface Actor {
   id: string;
@@ -41,6 +42,21 @@ export class ExpensesController {
       limit: limit ? Number(limit) : undefined,
       page: page ? Number(page) : undefined,
     });
+  }
+
+  @Get(":id")
+  async get(@Param("id") id: string) {
+    return this.expensesService.get(id);
+  }
+
+  /** Owner or admin. Line changes re-book only the stock difference. */
+  @Patch(":id")
+  async update(
+    @Param("id") id: string,
+    @Body() dto: UpdateExpenseDto,
+    @CurrentUser() actor: Actor,
+  ) {
+    return this.expensesService.update(id, dto, actor);
   }
 
   @Delete(":id")

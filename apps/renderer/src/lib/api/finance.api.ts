@@ -1,10 +1,12 @@
-import { apiGet, apiPost, apiDelete } from "./client";
+import { apiGet, apiPost, apiPatch, apiDelete } from "./client";
 import type {
   Expense,
   ExpenseCategory,
   FinanceStats,
   PageMeta,
   PaymentKind,
+  StockItemKind,
+  StockUnit,
 } from "@fuego/shared";
 
 export interface ExpenseFilterParams {
@@ -23,12 +25,26 @@ export interface PaymentFilterParams {
   page?: number;
 }
 
+/** A purchased material: an existing stock item, or one to create with the expense. */
+export interface ExpenseLinePayload {
+  stock_item_id?: string;
+  new_item?: { name: string; unit: StockUnit; kind?: StockItemKind; category?: string };
+  quantity: number; // thousandths of the unit
+  unit_price: number; // millimes per unit
+}
+
 export interface CreateExpensePayload {
   category: ExpenseCategory;
-  amount: number; // millimes
+  /** Ignored by the server when lines are sent (it uses Σ line totals). */
+  amount?: number; // millimes
   note?: string;
   date?: string; // YYYY-MM-DD
+  lines?: ExpenseLinePayload[];
+  /** Idempotency key — one per opened form. */
+  client_ref?: string;
 }
+
+export type UpdateExpensePayload = Omit<CreateExpensePayload, "client_ref">;
 
 export interface PaymentReceiptRow {
   id: string;
@@ -78,6 +94,10 @@ export const expensesApi = {
 
   create(payload: CreateExpensePayload): Promise<Expense> {
     return apiPost<Expense>("/expenses", payload);
+  },
+
+  update(id: string, payload: UpdateExpensePayload): Promise<Expense> {
+    return apiPatch<Expense>(`/expenses/${id}`, payload);
   },
 
   delete(id: string): Promise<{ ok: boolean }> {

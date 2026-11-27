@@ -14,7 +14,8 @@
     "test:api": "node scripts/test-phase0.mjs",
     "test:phase1": "node scripts/test-phase1.mjs",
     "test:phase2-3": "node scripts/test-phase2-3.mjs",
-    "test:all": "pnpm -C apps/backend test && node scripts/test-phase1.mjs && node scripts/test-phase2-3.mjs",
+    "test:stock": "node scripts/test-stock.mjs",
+    "test:all": "pnpm -C apps/backend test && node scripts/test-phase1.mjs && node scripts/test-phase2-3.mjs && node scripts/test-stock.mjs",
     "postinstall": "node scripts/check-deps.mjs"
   },
   "devDependencies": {

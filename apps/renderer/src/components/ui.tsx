@@ -51,11 +51,15 @@ export function Button({
 
 export function Input({
   className = "",
+  invalid = false,
   ...rest
-}: InputHTMLAttributes<HTMLInputElement>) {
+}: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
   return (
     <input
-      className={`w-full rounded-btn border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 ${className}`}
+      aria-invalid={invalid || undefined}
+      className={`w-full rounded-btn border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-2 disabled:opacity-60 ${
+        invalid ? "border-danger/70 focus:ring-danger/30" : "border-border focus:ring-primary/30"
+      } ${className}`}
       {...rest}
     />
   );
@@ -76,9 +80,11 @@ export function Select({
   );
 }
 
-export function Label({ children }: { children: ReactNode }) {
+export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
   return (
-    <label className="mb-1.5 block text-sm font-medium text-text-primary">{children}</label>
+    <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-text-primary">
+      {children}
+    </label>
   );
 }
 
@@ -141,16 +147,177 @@ export function EmptyState({
   icon,
   title,
   description,
+  action,
 }: {
   icon?: ReactNode;
   title: string;
   description?: string;
+  /** Optional next step, e.g. a "create the first item" button. */
+  action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-14 text-center">
+    <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
       {icon && <div className="mb-3 text-text-secondary">{icon}</div>}
       <p className="text-h3 font-semibold text-text-primary">{title}</p>
       {description && <p className="mt-1 max-w-md text-sm text-text-secondary">{description}</p>}
+      {action && <div className="mt-5">{action}</div>}
+    </div>
+  );
+}
+
+/** Placeholder block shown while data loads (keeps the layout from jumping). */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-border/50 ${className}`} />;
+}
+
+/** Table-shaped loading state: `rows` lines of muted bars. */
+export function TableSkeleton({ rows = 6, cols = 5 }: { rows?: number; cols?: number }) {
+  return (
+    <div className="divide-y divide-border" aria-busy="true" aria-label="Chargement">
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r} className="flex items-center gap-4 px-4 py-3.5">
+          {Array.from({ length: cols }).map((__, c) => (
+            <Skeleton key={c} className={`h-3.5 ${c === 0 ? "w-1/4" : "flex-1"}`} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Inline error block with a retry, for a query that failed. */
+export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-4 py-12 text-center" role="alert">
+      <p className="text-sm font-medium text-danger">{message}</p>
+      {onRetry && (
+        <Button variant="secondary" className="mt-4" onClick={onRetry}>
+          Réessayer
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Coloured dot + text — status is never colour alone. */
+export function StatusDot({
+  tone,
+  children,
+}: {
+  tone: "success" | "warning" | "danger" | "neutral";
+  children: ReactNode;
+}) {
+  const dot: Record<string, string> = {
+    success: "bg-success",
+    warning: "bg-warning",
+    danger: "bg-danger",
+    neutral: "bg-text-secondary",
+  };
+  const text: Record<string, string> = {
+    success: "text-success",
+    warning: "text-warning",
+    danger: "text-danger",
+    neutral: "text-text-secondary",
+  };
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium ${text[tone]}`}>
+      <span className={`h-2 w-2 shrink-0 rounded-full ${dot[tone]}`} aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
+/** Pill tab switcher used inside a page (Finances, Stock). */
+export function SegmentedTabs<T extends string>({
+  value,
+  onChange,
+  options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: string; count?: number }>;
+}) {
+  return (
+    <div role="tablist" className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface-2 p-1">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          role="tab"
+          aria-selected={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={`flex shrink-0 items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+            value === o.value
+              ? "bg-surface text-text-primary shadow-sm"
+              : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {o.label}
+          {o.count !== undefined && o.count > 0 && (
+            <span className="rounded-full bg-warning/15 px-1.5 text-[11px] font-semibold tabular-nums text-warning">
+              {o.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Side panel anchored to the right: a detail view that keeps the list in
+ * sight. Full width on small screens.
+ */
+export function Drawer({
+  open,
+  onClose,
+  title,
+  subtitle,
+  children,
+  footer,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  subtitle?: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="relative z-10 flex h-full w-full max-w-xl flex-col border-l border-border bg-surface shadow-hover"
+        style={{ animation: "drawer-in 220ms cubic-bezier(0.24, 1, 0.4, 1)" }}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4 sm:px-6 sm:py-5">
+          <div className="min-w-0">
+            <h2 className="truncate text-h3 font-semibold text-text-primary">{title}</h2>
+            {subtitle && <div className="mt-1 text-sm text-text-secondary">{subtitle}</div>}
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-btn p-1 text-text-secondary hover:bg-surface-2"
+            aria-label="Fermer"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
+        {footer && <footer className="border-t border-border px-5 py-4 sm:px-6">{footer}</footer>}
+      </aside>
     </div>
   );
 }
@@ -182,7 +349,10 @@ export function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       <div
-        className={`relative z-10 w-full ${width} rounded-modal border border-border bg-surface p-6 shadow-hover`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`relative z-10 max-h-[calc(100vh-2rem)] w-full ${width} overflow-y-auto rounded-modal border border-border bg-surface p-5 shadow-hover sm:p-6`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-semibold text-text-primary">{title}</h2>
@@ -248,7 +418,16 @@ export interface MoreMenuItem {
  * Secondary actions tucked behind one "Plus" button, so a screen keeps a
  * single obvious main action. Closes on outside click and on Escape.
  */
-export function MoreMenu({ items, label = "Plus" }: { items: MoreMenuItem[]; label?: string }) {
+export function MoreMenu({
+  items,
+  label = "Plus",
+  placement = "down",
+}: {
+  items: MoreMenuItem[];
+  label?: string;
+  /** "up" for menus anchored at the bottom of a panel. */
+  placement?: "down" | "up";
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -283,7 +462,9 @@ export function MoreMenu({ items, label = "Plus" }: { items: MoreMenuItem[]; lab
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-40 mt-2 w-64 overflow-hidden rounded-card border border-border bg-surface py-1 shadow-hover"
+          className={`absolute right-0 z-40 w-64 overflow-hidden rounded-card border border-border bg-surface py-1 shadow-hover ${
+            placement === "up" ? "bottom-full mb-2" : "mt-2"
+          }`}
         >
           {items.map((item) => (
             <button

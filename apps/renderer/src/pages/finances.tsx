@@ -15,24 +15,27 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
-  PieChart,
+  Pencil,
+  Boxes,
 } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { financeApi, expensesApi, type PaymentReceiptRow } from "@/lib/api/finance.api";
 import { useAuthStore } from "@/hooks/use-auth-store";
+import { ExpenseFormModal } from "@/components/expenses/expense-form-modal";
 import { useToast } from "@/hooks/use-toast";
-import { formatMillimes, formatDate, formatDateTime } from "@/lib/format";
+import { formatMillimes, formatDate, formatDateTime, formatQty } from "@/lib/format";
 import {
   Button,
   Card,
   Input,
   Select,
   Label,
-  Modal,
   ConfirmDialog,
   Badge,
   PageLoader,
   EmptyState,
+  SegmentedTabs,
+  TableSkeleton,
 } from "@/components/ui";
 import {
   EXPENSE_CATEGORIES,
@@ -64,14 +67,9 @@ export default function FinancesPage() {
   const [paymentTo, setPaymentTo] = useState<string>("");
   const [paymentPage, setPaymentPage] = useState<number>(1);
 
-  // Modal State: Create Expense
-  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-  const [newCategory, setNewCategory] = useState<ExpenseCategory>("materials");
-  const [newAmountDt, setNewAmountDt] = useState<string>("");
-  const [newNote, setNewNote] = useState<string>("");
-  const [newDate, setNewDate] = useState<string>(
-    new Date().toISOString().split("T")[0],
-  );
+  // Expense form: null = closed, {expense: null} = create, {expense} = edit
+  const [expenseForm, setExpenseForm] = useState<{ expense: Expense | null } | null>(null);
+  const canChange = (exp: Expense) => isAdmin || exp.recorded_by === user?.id;
 
   // Delete Expense Dialog State
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
@@ -109,38 +107,14 @@ export default function FinancesPage() {
   });
 
   // Mutations
-  const createExpenseMutation = useMutation({
-    mutationFn: () => {
-      const parsed = parseFloat(newAmountDt.replace(",", "."));
-      if (Number.isNaN(parsed) || parsed <= 0) {
-        throw new Error("Montant invalide");
-      }
-      const amountMillimes = Math.round(parsed * 1000);
-      return expensesApi.create({
-        category: newCategory,
-        amount: amountMillimes,
-        note: newNote || undefined,
-        date: newDate || undefined,
-      });
-    },
-    onSuccess: () => {
-      toast.success("Dépense enregistrée avec succès");
-      setIsExpenseModalOpen(false);
-      setNewAmountDt("");
-      setNewNote("");
-      queryClient.invalidateQueries({ queryKey: ["expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["finance", "stats"] });
-    },
-    onError: (err: any) => toast.error(err.message || "Erreur lors de l'enregistrement"),
-  });
-
   const deleteExpenseMutation = useMutation({
     mutationFn: (id: string) => expensesApi.delete(id),
     onSuccess: () => {
       toast.success("Dépense supprimée");
       setDeletingExpense(null);
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
-      queryClient.invalidateQueries({ queryKey: ["finance", "stats"] });
+      queryClient.invalidateQueries({ queryKey: ["finance"] });
+      queryClient.invalidateQueries({ queryKey: ["stock"] });
     },
     onError: (err: any) => toast.error(err.message || "Impossible de supprimer la dépense"),
   });
@@ -160,46 +134,19 @@ export default function FinancesPage() {
     >
       {/* Header Actions */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        {/* Navigation Tabs */}
-        <div className="flex rounded-lg border border-border bg-surface-2 p-1">
-          <button
-            onClick={() => setActiveTab("overview")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === "overview"
-                ? "bg-surface text-text-primary shadow-sm"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            Vue d'ensemble
-          </button>
-          <button
-            onClick={() => setActiveTab("expenses")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === "expenses"
-                ? "bg-surface text-text-primary shadow-sm"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            Dépenses & Charges
-          </button>
-          <button
-            onClick={() => setActiveTab("payments")}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === "payments"
-                ? "bg-surface text-text-primary shadow-sm"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            Journal des encaissements
-          </button>
-        </div>
+        <SegmentedTabs<FinanceTab>
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: "overview", label: "Vue d'ensemble" },
+            { value: "expenses", label: "Dépenses & Charges" },
+            { value: "payments", label: "Journal des encaissements" },
+          ]}
+        />
 
-        <Button
-          onClick={() => setIsExpenseModalOpen(true)}
-          className="shadow-sm"
-        >
+        <Button onClick={() => setExpenseForm({ expense: null })} className="shadow-sm">
           <Plus className="h-4 w-4" />
-          Ajouter une dépense
+          Déclarer une dépense
         </Button>
       </div>
 
@@ -504,7 +451,7 @@ export default function FinancesPage() {
           {/* Expenses Table */}
           <Card className="overflow-hidden">
             {expensesLoading ? (
-              <PageLoader />
+              <TableSkeleton rows={6} cols={5} />
             ) : !expensesRes || expensesRes.data.length === 0 ? (
               <EmptyState
                 icon={<Receipt className="h-10 w-10" />}
@@ -521,7 +468,9 @@ export default function FinancesPage() {
                       <th className="px-4 py-3">Note / Description</th>
                       <th className="px-4 py-3 text-right">Montant</th>
                       <th className="px-4 py-3">Enregistré par</th>
-                      {isAdmin && <th className="px-4 py-3 text-center">Actions</th>}
+                      <th className="px-4 py-3 text-right">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -536,7 +485,26 @@ export default function FinancesPage() {
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-text-primary">
-                          {exp.note || <span className="italic text-text-secondary">—</span>}
+                          {exp.note || (exp.lines.length === 0 && <span className="italic text-text-secondary">—</span>)}
+                          {exp.lines.length > 0 && (
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              <span
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-primary"
+                                title="Matières ajoutées au stock"
+                              >
+                                <Boxes className="h-3.5 w-3.5" />
+                                Stock
+                              </span>
+                              {exp.lines.map((l) => (
+                                <span
+                                  key={l.id}
+                                  className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[11px] tabular-nums text-text-secondary"
+                                >
+                                  {l.item_name} · {formatQty(l.quantity, l.item_unit)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-danger">
                           -{formatMillimes(exp.amount)}
@@ -544,17 +512,28 @@ export default function FinancesPage() {
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-text-secondary">
                           {exp.recorded_by_label}
                         </td>
-                        {isAdmin && (
-                          <td className="whitespace-nowrap px-4 py-3 text-center">
-                            <button
-                              onClick={() => setDeletingExpense(exp)}
-                              className="rounded p-1 text-text-secondary hover:bg-danger/10 hover:text-danger transition-colors"
-                              title="Supprimer la dépense"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </td>
-                        )}
+                        <td className="whitespace-nowrap px-4 py-3 text-right">
+                          {canChange(exp) && (
+                            <div className="flex justify-end gap-1">
+                              <button
+                                onClick={() => setExpenseForm({ expense: exp })}
+                                className="rounded p-1 text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
+                                title="Modifier la dépense"
+                                aria-label="Modifier la dépense"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeletingExpense(exp)}
+                                className="rounded p-1 text-text-secondary transition-colors hover:bg-danger/10 hover:text-danger"
+                                title="Supprimer la dépense"
+                                aria-label="Supprimer la dépense"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -653,7 +632,7 @@ export default function FinancesPage() {
           {/* Payments Table */}
           <Card className="overflow-hidden">
             {paymentsLoading ? (
-              <PageLoader />
+              <TableSkeleton rows={6} cols={6} />
             ) : !paymentsRes || paymentsRes.data.length === 0 ? (
               <EmptyState
                 icon={<DollarSign className="h-10 w-10" />}
@@ -767,76 +746,12 @@ export default function FinancesPage() {
         </div>
       )}
 
-      {/* MODAL: NOUVELLE DÉPENSE */}
-      <Modal
-        open={isExpenseModalOpen}
-        onClose={() => setIsExpenseModalOpen(false)}
-        title="Ajouter une dépense / charge"
-      >
-        <div className="space-y-4">
-          <div>
-            <Label>Catégorie</Label>
-            <Select
-              value={newCategory}
-              onChange={(e) => setNewCategory(e.target.value as ExpenseCategory)}
-            >
-              {EXPENSE_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {EXPENSE_CATEGORY_LABELS[c]}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <Label>Montant (en Dinars Tunisiens DT)</Label>
-            <Input
-              type="text"
-              placeholder="Ex: 25.500"
-              value={newAmountDt}
-              onChange={(e) => setNewAmountDt(e.target.value)}
-              autoFocus
-            />
-            <p className="mt-1 text-xs text-text-secondary">
-              Précision jusqu'à 3 décimales (ex : 12.500 DT).
-            </p>
-          </div>
-
-          <div>
-            <Label>Date</Label>
-            <Input
-              type="date"
-              value={newDate}
-              onChange={(e) => setNewDate(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <Label>Description / Justificatif (optionnel)</Label>
-            <Input
-              type="text"
-              placeholder="Ex : Facture électricité Steg, Achat fil de soie..."
-              value={newNote}
-              onChange={(e) => setNewNote(e.target.value)}
-            />
-          </div>
-
-          <div className="mt-6 flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setIsExpenseModalOpen(false)}
-            >
-              Annuler
-            </Button>
-            <Button
-              loading={createExpenseMutation.isPending}
-              onClick={() => createExpenseMutation.mutate()}
-            >
-              Enregistrer
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      {/* Declare / edit an expense — materials lines feed the stock */}
+      <ExpenseFormModal
+        open={Boolean(expenseForm)}
+        onClose={() => setExpenseForm(null)}
+        expense={expenseForm?.expense}
+      />
 
       {/* CONFIRM DIALOG: SUPPRESSION DÉPENSE */}
       <ConfirmDialog
@@ -848,9 +763,13 @@ export default function FinancesPage() {
         title="Supprimer la dépense"
         message={
           deletingExpense
-            ? `Êtes-vous sûr de vouloir supprimer la dépense de ${formatMillimes(
-                deletingExpense.amount,
-              )} (${EXPENSE_CATEGORY_LABELS[deletingExpense.category]}) ? Cette opération sera enregistrée dans le journal d'audit.`
+            ? `Supprimer la dépense de ${formatMillimes(deletingExpense.amount)} (${
+                EXPENSE_CATEGORY_LABELS[deletingExpense.category]
+              }) ?${
+                deletingExpense.lines.length > 0
+                  ? ` Les ${deletingExpense.lines.length} matière(s) achetée(s) seront retirées du stock.`
+                  : ""
+              } L'opération est enregistrée dans le journal d'audit.`
             : ""
         }
         confirmLabel="Supprimer"

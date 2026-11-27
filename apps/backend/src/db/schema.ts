@@ -202,12 +202,114 @@ export const expenses = sqliteTable(
     date: text("date").notNull(), // YYYY-MM-DD
     recorded_by: text("recorded_by").notNull(),
     recorded_by_label: text("recorded_by_label").notNull(),
+    /**
+     * Idempotency key sent by the form (one per opened form). A second submit
+     * with the same key returns the first expense instead of booking it — and
+     * its stock — twice. NULL for rows created before the key existed.
+     */
+    client_ref: text("client_ref"),
     created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+    updated_at: tsMs("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdate(() => new Date()),
   },
   (table) => [
     index("expenses_category_idx").on(table.category),
     index("expenses_date_idx").on(table.date),
     index("expenses_created_at_idx").on(table.created_at),
+    uniqueIndex("expenses_client_ref_key").on(table.client_ref),
+  ],
+);
+
+/**
+ * Stock items — raw materials, supplies and articles. The quantity is never
+ * stored here: it is Σ stock_movements.quantity, so it cannot drift from the
+ * history.
+ */
+export const stockItems = sqliteTable(
+  "stock_items",
+  {
+    id: text("id").primaryKey().notNull(),
+    name: text("name").notNull(),
+    /** Accent/case/space-insensitive name — unique, blocks duplicates. */
+    name_key: text("name_key").notNull(),
+    /** StockItemKind — constrained in code. */
+    kind: text("kind").notNull().default("raw_material"),
+    category: text("category"),
+    /** StockUnit — constrained in code. */
+    unit: text("unit").notNull(),
+    /** Thousandths of the unit; 0 = no low-stock alert. */
+    min_threshold: integer("min_threshold").notNull().default(0),
+    note: text("note"),
+    is_active: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    created_by: text("created_by").notNull(),
+    created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+    updated_at: tsMs("updated_at")
+      .notNull()
+      .$defaultFn(() => new Date())
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("stock_items_name_key").on(table.name_key),
+    index("stock_items_kind_idx").on(table.kind),
+  ],
+);
+
+/** Purchased materials of a "materials" expense (replaced on edit). */
+export const expenseLines = sqliteTable(
+  "expense_lines",
+  {
+    id: text("id").primaryKey().notNull(),
+    expense_id: text("expense_id")
+      .notNull()
+      .references(() => expenses.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    stock_item_id: text("stock_item_id")
+      .notNull()
+      .references(() => stockItems.id, { onDelete: "restrict" }),
+    /** Thousandths of the item's unit, ≥ 1. */
+    quantity: integer("quantity").notNull(),
+    /** Millimes per whole unit. */
+    unit_price: integer("unit_price").notNull(),
+    /** Millimes. */
+    line_total: integer("line_total").notNull(),
+  },
+  (table) => [
+    index("expense_lines_expense_id_idx").on(table.expense_id),
+    index("expense_lines_stock_item_id_idx").on(table.stock_item_id),
+  ],
+);
+
+/**
+ * Append-only stock ledger. Nothing is edited or deleted: an expense edit
+ * adds a correction row, an expense deletion adds a reversal row.
+ */
+export const stockMovements = sqliteTable(
+  "stock_movements",
+  {
+    id: text("id").primaryKey().notNull(),
+    stock_item_id: text("stock_item_id")
+      .notNull()
+      .references(() => stockItems.id, { onDelete: "restrict" }),
+    /** StockMovementKind — constrained in code. */
+    kind: text("kind").notNull(),
+    /** Signed thousandths of the unit (+ in, − out), never 0. */
+    quantity: integer("quantity").notNull(),
+    /** Millimes per unit for purchases. */
+    unit_cost: integer("unit_cost"),
+    reason: text("reason"),
+    date: text("date").notNull(), // YYYY-MM-DD
+    /** The expense that caused it; NULL once that expense is deleted. */
+    expense_id: text("expense_id").references(() => expenses.id, { onDelete: "set null" }),
+    recorded_by: text("recorded_by").notNull(),
+    recorded_by_label: text("recorded_by_label").notNull(),
+    created_at: tsMs("created_at").notNull().$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("stock_movements_item_idx").on(table.stock_item_id, table.created_at),
+    index("stock_movements_expense_idx").on(table.expense_id),
+    index("stock_movements_created_at_idx").on(table.created_at),
   ],
 );
 

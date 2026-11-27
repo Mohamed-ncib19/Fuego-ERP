@@ -10,6 +10,7 @@ import { HealthController } from "./health/health.controller";
 import { OrdersModule } from "./orders/orders.module";
 import { ExpensesModule } from "./expenses/expenses.module";
 import { FinanceModule } from "./finance/finance.module";
+import { StockModule } from "./stock/stock.module";
 import { ApiKeyGuard } from "./common/guards/api-key.guard";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
@@ -25,6 +26,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
     OrdersModule,
     ExpensesModule,
     FinanceModule,
+    StockModule,
   ],
   controllers: [HealthController],
   // Guard order = registration order: API key first (blocks non-app callers),

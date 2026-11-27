@@ -1,6 +1,7 @@
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
+import { StockService } from "../stock/stock.service";
 import { OrdersService } from "../orders/orders.service";
 import { ExpensesService } from "../expenses/expenses.service";
 import { FinanceService } from "./finance.service";
@@ -23,7 +24,7 @@ describe("FinanceService — KPIs & Cashflow aggregation", () => {
     db = new DbService();
     audit = new AuditService(db);
     ordersService = new OrdersService(db, audit);
-    expensesService = new ExpensesService(db, audit);
+    expensesService = new ExpensesService(db, audit, new StockService(db, audit));
     financeService = new FinanceService(db);
 
     // Create an order with total 100 DT (100000 millimes)

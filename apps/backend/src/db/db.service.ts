@@ -190,4 +190,73 @@ export function ensureTables(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS expenses_date_idx ON expenses (date);
     CREATE INDEX IF NOT EXISTS expenses_created_at_idx ON expenses (created_at);
   `);
+
+  // Columns added after the first release. CREATE TABLE IF NOT EXISTS never
+  // touches an existing table, so installed databases get them here.
+  addColumnIfMissing(sqlite, "expenses", "client_ref", "TEXT");
+  addColumnIfMissing(sqlite, "expenses", "updated_at", "INTEGER");
+  sqlite.exec(`UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL;`);
+
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS expenses_client_ref_key ON expenses (client_ref);
+
+    CREATE TABLE IF NOT EXISTS stock_items (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      name_key TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'raw_material',
+      category TEXT,
+      unit TEXT NOT NULL,
+      min_threshold INTEGER NOT NULL DEFAULT 0,
+      note TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS stock_items_name_key ON stock_items (name_key);
+    CREATE INDEX IF NOT EXISTS stock_items_kind_idx ON stock_items (kind);
+
+    CREATE TABLE IF NOT EXISTS expense_lines (
+      id TEXT PRIMARY KEY NOT NULL,
+      expense_id TEXT NOT NULL REFERENCES expenses (id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      stock_item_id TEXT NOT NULL REFERENCES stock_items (id) ON DELETE RESTRICT,
+      quantity INTEGER NOT NULL,
+      unit_price INTEGER NOT NULL,
+      line_total INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS expense_lines_expense_id_idx ON expense_lines (expense_id);
+    CREATE INDEX IF NOT EXISTS expense_lines_stock_item_id_idx ON expense_lines (stock_item_id);
+
+    CREATE TABLE IF NOT EXISTS stock_movements (
+      id TEXT PRIMARY KEY NOT NULL,
+      stock_item_id TEXT NOT NULL REFERENCES stock_items (id) ON DELETE RESTRICT,
+      kind TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      unit_cost INTEGER,
+      reason TEXT,
+      date TEXT NOT NULL,
+      expense_id TEXT REFERENCES expenses (id) ON DELETE SET NULL,
+      recorded_by TEXT NOT NULL,
+      recorded_by_label TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS stock_movements_item_idx ON stock_movements (stock_item_id, created_at);
+    CREATE INDEX IF NOT EXISTS stock_movements_expense_idx ON stock_movements (expense_id);
+    CREATE INDEX IF NOT EXISTS stock_movements_created_at_idx ON stock_movements (created_at);
+  `);
+}
+
+/** Additive-only migration step: ALTER TABLE ADD COLUMN when the column is absent. */
+function addColumnIfMissing(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }

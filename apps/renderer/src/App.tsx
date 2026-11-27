@@ -16,6 +16,8 @@ import OrderDetailPage from "@/pages/order-detail";
 import OrderTicketPage from "@/pages/order-ticket";
 import FinancesPage from "@/pages/finances";
 import AuditPage from "@/pages/audit";
+import StockPage from "@/pages/stock";
+import RawMaterialsPage from "@/pages/raw-materials";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -118,6 +120,23 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <FinancesPage />
+          </RequireAuth>
+        }
+      />
+      {/* Stock module */}
+      <Route
+        path="/stock"
+        element={
+          <RequireAuth>
+            <StockPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/stock/matieres"
+        element={
+          <RequireAuth>
+            <RawMaterialsPage />
           </RequireAuth>
         }
       />

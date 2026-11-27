@@ -91,7 +91,9 @@ export async function apiGet<T, M = Record<string, unknown>>(
   params?: Record<string, unknown>,
 ): Promise<{ data: T; meta?: M }> {
   const res = await http.get<Envelope<T>>(url, { params });
-  return { data: res.data.data as T, meta: res.data.meta as M | undefined };
+  // Extra top-level envelope fields (e.g. `totalAmount` on expense and
+  // payment lists) pass through instead of being dropped.
+  return { ...(res.data as object), data: res.data.data as T, meta: res.data.meta as M | undefined };
 }
 
 export async function apiPost<T>(url: string, body?: unknown): Promise<T> {

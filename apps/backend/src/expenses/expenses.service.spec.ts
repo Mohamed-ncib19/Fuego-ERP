@@ -1,6 +1,7 @@
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
+import { StockService } from "../stock/stock.service";
 import { ExpensesService } from "./expenses.service";
 import { ForbiddenException } from "@nestjs/common";
 
@@ -31,7 +32,7 @@ describe("ExpensesService — accounting & deletion rules", () => {
     process.env.DB_PATH = ":memory:";
     db = new DbService();
     audit = new AuditService(db);
-    service = new ExpensesService(db, audit);
+    service = new ExpensesService(db, audit, new StockService(db, audit));
   });
 
   afterAll(() => {
