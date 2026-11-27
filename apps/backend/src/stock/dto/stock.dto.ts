@@ -111,6 +111,13 @@ export class SetActiveDto {
   is_active!: boolean;
 }
 
+/** DELETE /stock/items/:id — also delete the purchase dépenses, or keep their amounts. */
+export class DeleteStockItemDto {
+  @IsOptional()
+  @IsBoolean()
+  delete_expenses?: boolean;
+}
+
 export class RecordMovementDto {
   /** entry / exit move by `quantity`; count sets the counted quantity. */
   @IsIn(["entry", "exit", "count"], { message: "Type de mouvement invalide" })

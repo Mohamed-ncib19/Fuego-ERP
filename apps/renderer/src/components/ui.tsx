@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { Badge as AxBadge } from "@astryxdesign/core/Badge";
+import { Text as AxText } from "@astryxdesign/core/Text";
 import { Card as AxCard } from "@astryxdesign/core/Card";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Drawer as AxDrawer, DrawerHeader } from "@astryxdesign/core/Drawer";
@@ -73,13 +74,20 @@ export function Button({
   const label = rest["aria-label"] || textOf(children) || title || "Action";
   // Pages write `<Button><Plus /> Nouveau</Button>`: the leading icon element
   // goes to Astryx's icon slot (aligned, sized) and the rest stays the label.
+  // A trailing icon (`Ouvrir <ArrowRight />`) goes to the end slot the same way.
+  const isIcon = (n: ReactNode) => isValidElement(n) && typeof n.type !== "string";
   let leading = icon;
-  let content: ReactNode = children;
-  const parts = Children.toArray(children);
-  if (!leading && parts.length >= 1 && isValidElement(parts[0]) && typeof parts[0].type !== "string") {
+  let trailing: ReactNode = undefined;
+  let parts = Children.toArray(children);
+  if (!leading && parts.length >= 1 && isIcon(parts[0])) {
     leading = parts[0];
-    content = parts.length > 1 ? parts.slice(1) : null;
+    parts = parts.slice(1);
   }
+  if (parts.length > 1 && isIcon(parts[parts.length - 1])) {
+    trailing = parts[parts.length - 1];
+    parts = parts.slice(0, -1);
+  }
+  const content: ReactNode = parts.length ? parts : null;
   const iconOnly = !textOf(content);
   return (
     <AxButton
@@ -94,6 +102,7 @@ export function Button({
       tooltip={title}
       form={form}
       icon={leading}
+      endContent={trailing}
       className={className}
       data-testid={rest["data-testid" as keyof typeof rest] as string | undefined}
     >
@@ -510,5 +519,46 @@ export function PhoneInput({
         className="h-full w-full bg-transparent px-3 tracking-wide text-text-primary outline-none"
       />
     </div>
+  );
+}
+
+const TILE_TONE = {
+  success: "text-success",
+  danger: "text-danger",
+  warning: "text-warning",
+  info: "text-info",
+  primary: "text-primary",
+} as const;
+
+/** KPI tile used across pages: small label, large tabular number, optional hint. */
+export function SummaryTile({
+  label,
+  value,
+  hint,
+  tone,
+  className,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: keyof typeof TILE_TONE;
+  className?: string;
+}) {
+  return (
+    <AxCard padding={4} className={className}>
+      <AxText type="supporting" color="secondary" display="block">
+        {label}
+      </AxText>
+      <span
+        className={`mt-1 block text-[26px] font-semibold leading-tight tabular-nums ${tone ? TILE_TONE[tone] : ""}`}
+      >
+        {value}
+      </span>
+      {hint && (
+        <AxText type="supporting" color="secondary" display="block">
+          {hint}
+        </AxText>
+      )}
+    </AxCard>
   );
 }

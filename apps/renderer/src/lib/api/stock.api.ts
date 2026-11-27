@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from "./client";
+import { apiDelete, apiGet, apiPatch, apiPost } from "./client";
 import type {
   Expense,
   ManualMovementType,
@@ -51,6 +51,13 @@ export interface MovementFilter {
   limit?: number;
 }
 
+export interface MaterialUsage {
+  movements: number;
+  expenses: { id: string; date: string; note: string | null; amount: number; item_amount: number; has_other_lines: boolean }[];
+  /** This material's share of those dépenses, in millimes. */
+  expense_total: number;
+}
+
 export const stockApi = {
   listItems(params?: StockItemFilter): Promise<{ data: StockItem[]; summary: StockSummary }> {
     return apiGet<StockItem[], { summary: StockSummary }>("/stock/items", params as any).then((r) => ({
@@ -74,6 +81,16 @@ export const stockApi = {
 
   updateItem(id: string, payload: StockItemUpdate): Promise<StockItem> {
     return apiPatch<StockItem>(`/stock/items/${id}`, payload);
+  },
+
+  /** What a permanent delete would remove (admin). */
+  usage(id: string): Promise<MaterialUsage> {
+    return apiGet<MaterialUsage>(`/stock/items/${id}/usage`).then((r) => r.data);
+  },
+
+  /** Permanent delete; frees the name. `delete_expenses` also removes the purchase amounts. */
+  deleteItem(id: string, delete_expenses: boolean): Promise<{ deleted_expenses: number; updated_expenses: number }> {
+    return apiDelete(`/stock/items/${id}`, { delete_expenses });
   },
 
   setActive(id: string, is_active: boolean): Promise<StockItem> {

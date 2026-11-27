@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Eye, EyeOff, Flame } from "lucide-react";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { InputGroup } from "@astryxdesign/core/InputGroup";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Banner } from "@astryxdesign/core/Banner";
 import { authApi, settingsApi, setupApi } from "@/lib/api/auth.api";
 import { useAuthStore } from "@/hooks/use-auth-store";
-import { Button, Input, Label, FieldError } from "@/components/ui";
 
 const loginSchema = {
   email: (v: string) => /\S+@\S+\.\S+/.test(v) || "Adresse e-mail invalide",
@@ -46,10 +50,10 @@ export default function LoginPage() {
     if (setupStatus?.needs_setup) navigate("/setup", { replace: true });
   }, [setupStatus, navigate]);
 
-  const { register, handleSubmit, formState } = useForm<{
+  const { control, handleSubmit, formState } = useForm<{
     email: string;
     password: string;
-  }>();
+  }>({ defaultValues: { email: "", password: "" } });
   const { errors, isSubmitting } = formState;
 
   const mutation = useMutation({
@@ -70,7 +74,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-2 bg-[radial-gradient(ellipse_at_top,rgb(var(--color-primary-500)/0.14),transparent_60%)] p-4">
       <div className="w-full max-w-sm">
-        <div className="rounded-modal border border-border bg-surface p-8 shadow-hover">
+        <Card padding={8} elevation="high" width="100%">
           <div className="mb-8 flex flex-col items-center">
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-card bg-primary shadow-md">
               <Flame className="h-7 w-7 text-neutral-950" />
@@ -79,49 +83,79 @@ export default function LoginPage() {
             <p className="text-sm text-text-secondary">Gestion des commandes & finances</p>
           </div>
 
-          {error && (
-            <div className="mb-4 rounded-btn border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-              {error}
-            </div>
-          )}
+          <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+            {error && <Banner status="error" title={error} />}
 
-          <form onSubmit={onSubmit} className="space-y-4" noValidate>
-            <div>
-              <Label>E-mail</Label>
-              <Input
-                type="email"
-                autoComplete="email"
-                placeholder="vous@commerce.tn"
-                {...register("email", { validate: loginSchema.email })}
-              />
-              <FieldError message={errors.email?.message as string | undefined} />
-            </div>
-            <div>
-              <Label>Mot de passe</Label>
-              <div className="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  className="pr-10"
-                  {...register("password", { validate: loginSchema.password })}
+            <Controller
+              name="email"
+              control={control}
+              rules={{ validate: loginSchema.email }}
+              render={({ field }) => (
+                <TextInput
+                  label="E-mail"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="vous@commerce.tn"
+                  value={field.value}
+                  onChange={field.onChange}
+                  htmlName={field.name}
+                  hasAutoFocus
+                  width="100%"
+                  status={
+                    errors.email?.message
+                      ? { type: "error", message: errors.email.message }
+                      : undefined
+                  }
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-text-secondary hover:text-text-primary"
-                  tabIndex={-1}
+              )}
+            />
+
+            <Controller
+              name="password"
+              control={control}
+              rules={{ validate: loginSchema.password }}
+              render={({ field }) => (
+                <InputGroup
+                  label="Mot de passe"
+                  status={
+                    errors.password?.message
+                      ? { type: "error", message: errors.password.message }
+                      : undefined
+                  }
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <FieldError message={errors.password?.message as string | undefined} />
-            </div>
-            <Button type="submit" className="w-full" loading={isSubmitting || mutation.isPending}>
+                  <TextInput
+                    label="Mot de passe"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={field.value}
+                    onChange={field.onChange}
+                    htmlName={field.name}
+                    status={errors.password ? { type: "error" } : undefined}
+                  />
+                  <Button
+                    label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                    isIconOnly
+                    variant="secondary"
+                    icon={showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    onClick={() => setShowPassword((v) => !v)}
+                  />
+                </InputGroup>
+              )}
+            />
+
+            <Button
+              label="Se connecter"
+              type="submit"
+              variant="primary"
+              width="100%"
+              isLoading={isSubmitting || mutation.isPending}
+            >
               Se connecter
             </Button>
           </form>
-        </div>
+        </Card>
         <p className="mt-4 text-center text-xs text-text-secondary">
           Fuego — gestion de commerce · {new Date().getFullYear()}
         </p>

@@ -5,12 +5,12 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { DbService } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
 import { StockService, type ExpenseLineInput, type ResolvedLine, type Tx } from "../stock/stock.service";
 import { diffByItem, netByItem } from "../stock/stock.math";
-import { expenseLines, expenses, stockItems } from "../db/schema";
+import { expenseLines, expenses, stockItems, stockMovements } from "../db/schema";
 import type { CreateExpenseDto, UpdateExpenseDto } from "./dto/expenses.dto";
 import type { CreateStockItemDto } from "../stock/dto/stock.dto";
 import {
@@ -31,6 +31,20 @@ interface Actor {
 }
 
 type ExpenseRow = typeof expenses.$inferSelect;
+
+export interface MaterialUsage {
+  movements: number;
+  expenses: {
+    id: string;
+    date: string;
+    note: string | null;
+    amount: number;
+    /** This material's share of the dépense, in millimes. */
+    item_amount: number;
+    has_other_lines: boolean;
+  }[];
+  expense_total: number;
+}
 
 /**
  * Expenses (dépenses). A "materials" expense may carry purchased-material
@@ -418,6 +432,118 @@ export class ExpensesService {
       meta: { category: STOCK_EXPENSE_CATEGORY, amount: result.amount, date, lines: result.resolved.map(auditLine) },
     });
     return { item, expense: await this.get(result.id) };
+  }
+
+  /**
+   * What deleting a material touches: its stock history and the dépenses
+   * that bought it (only this material's lines count toward `amount`).
+   */
+  async materialUsage(id: string): Promise<MaterialUsage> {
+    await this.stock.getItem(id); // 404 if unknown
+    return this.usageTx(this.db.client, id);
+  }
+
+  /**
+   * Hard delete: the item and its whole stock history go, so its name can be
+   * reused. Dépenses that bought it lose this material's lines; with
+   * `deleteExpenses` their amount goes too (a dépense left with nothing is
+   * deleted), otherwise the amount stays in the books as a plain expense.
+   */
+  async deleteMaterial(
+    id: string,
+    deleteExpenses: boolean,
+    actor: Actor,
+  ): Promise<{ ok: true; deleted_expenses: number; updated_expenses: number }> {
+    const item = await this.stock.getItem(id);
+    const now = new Date();
+
+    const result = this.db.client.transaction(
+      (tx) => {
+        const usage = this.usageTx(tx, id);
+        let deleted = 0;
+        let updated = 0;
+        for (const e of usage.expenses) {
+          tx.delete(expenseLines)
+            .where(and(eq(expenseLines.expense_id, e.id), eq(expenseLines.stock_item_id, id)))
+            .run();
+          // Nothing else in the dépense (no other line, no kept amount): it goes.
+          if (deleteExpenses && !e.has_other_lines && e.amount <= e.item_amount) {
+            tx.delete(expenses).where(eq(expenses.id, e.id)).run();
+            deleted++;
+            continue;
+          }
+          const row = tx.select().from(expenses).where(eq(expenses.id, e.id)).get()!;
+          tx.update(expenses)
+            .set(
+              deleteExpenses
+                ? { amount: row.amount - e.item_amount, updated_at: now }
+                : // Keep what was bought readable once the line is gone.
+                  { note: row.note ? `${row.note} (${item.name})` : `Achat — ${item.name}`, updated_at: now },
+            )
+            .where(eq(expenses.id, e.id))
+            .run();
+          updated++;
+        }
+        tx.delete(stockMovements).where(eq(stockMovements.stock_item_id, id)).run();
+        tx.delete(stockItems).where(eq(stockItems.id, id)).run();
+        return { deleted, updated, usage };
+      },
+      { behavior: "immediate" },
+    );
+
+    void this.audit.record({
+      action: "stock_item.deleted",
+      entityType: "stock_item",
+      entityId: id,
+      entityLabel: item.name,
+      actorId: actor.id,
+      actorLabel: actor.full_name,
+      actorRole: actor.role,
+      prevValues: { ...item },
+      meta: {
+        delete_expenses: deleteExpenses,
+        movements: result.usage.movements,
+        expenses: result.usage.expenses,
+      },
+    });
+    return { ok: true, deleted_expenses: result.deleted, updated_expenses: result.updated };
+  }
+
+  private usageTx(q: Tx | DbService["client"], id: string): MaterialUsage {
+    const movements = q
+      .select({ n: sql<number>`count(*)` })
+      .from(stockMovements)
+      .where(eq(stockMovements.stock_item_id, id))
+      .get()!.n;
+    const rows = q
+      .select({
+        id: expenses.id,
+        date: expenses.date,
+        note: expenses.note,
+        amount: expenses.amount,
+        item_amount: sql<number>`sum(${expenseLines.line_total})`,
+      })
+      .from(expenseLines)
+      .innerJoin(expenses, eq(expenses.id, expenseLines.expense_id))
+      .where(eq(expenseLines.stock_item_id, id))
+      .groupBy(expenses.id)
+      .orderBy(asc(expenses.date))
+      .all();
+    const list = rows.map((r) => ({
+      ...r,
+      has_other_lines: Boolean(
+        q
+          .select({ n: sql<number>`count(*)` })
+          .from(expenseLines)
+          .where(and(eq(expenseLines.expense_id, r.id), ne(expenseLines.stock_item_id, id)))
+          .get()!.n,
+      ),
+    }));
+    return {
+      movements,
+      expenses: list,
+      expense_total: list.reduce((t, e) => t + e.item_amount, 0),
+    };
   }
 
   /** The stored expense, read through the transaction handle. */

@@ -1,7 +1,11 @@
 import { useState, useEffect } from "react";
-import { Modal, Button, Input, Select, Label, FieldError } from "@/components/ui";
+import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Modal, Button } from "@/components/ui";
 import { formatMillimes } from "@/lib/format";
-import type { PaymentKind } from "@fuego/shared";
+import { ORDER_STATUS_LABELS, type OrderStatus, type PaymentKind } from "@fuego/shared";
 
 interface PaymentModalProps {
   open: boolean;
@@ -11,6 +15,19 @@ interface PaymentModalProps {
   remainingAmount: number;
   orderStatus: string;
 }
+
+const KIND_OPTIONS: { value: PaymentKind; label: string }[] = [
+  { value: "advance", label: "Avance (Acompte)" },
+  { value: "balance", label: "Règlement du solde" },
+  { value: "refund", label: "Remboursement" },
+];
+
+/** DT with three decimals, as on the ticket ("25,500"). */
+const dtFormat = new Intl.NumberFormat("fr-FR", {
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 3,
+  useGrouping: false,
+});
 
 export function PaymentModal({
   open,
@@ -22,40 +39,46 @@ export function PaymentModal({
 }: PaymentModalProps) {
   const isClosed = orderStatus === "delivered" || orderStatus === "cancelled";
   const [kind, setKind] = useState<PaymentKind>(isClosed ? "refund" : "advance");
-  const [amountDt, setAmountDt] = useState("");
+  /** Amount in DT as the field shows it; converted to millimes on submit. */
+  const [amountDt, setAmountDt] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
+  const [amountError, setAmountError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       if (isClosed) {
         setKind("refund");
-        setAmountDt(paidAmount > 0 ? (paidAmount / 1000).toFixed(3) : "");
+        setAmountDt(paidAmount > 0 ? paidAmount / 1000 : null);
       } else {
         setKind(remainingAmount > 0 ? "balance" : "advance");
-        setAmountDt(remainingAmount > 0 ? (remainingAmount / 1000).toFixed(3) : "");
+        setAmountDt(remainingAmount > 0 ? remainingAmount / 1000 : null);
       }
       setNote("");
+      setAmountError(null);
       setError(null);
     }
   }, [open, isClosed, paidAmount, remainingAmount]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const parsedDt = parseFloat(amountDt.replace(",", "."));
+  const submit = async () => {
+    if (loading) return;
+    const parsedDt = amountDt ?? Number.NaN;
     if (Number.isNaN(parsedDt) || parsedDt <= 0) {
-      setError("Veuillez saisir un montant valide supérieur à 0");
+      setAmountError("Veuillez saisir un montant valide supérieur à 0");
       return;
     }
 
     const millimes = Math.round(parsedDt * 1000);
     if (kind === "refund" && millimes > paidAmount) {
-      setError(`Le remboursement ne peut pas dépasser le montant payé (${formatMillimes(paidAmount)})`);
+      setAmountError(
+        `Le remboursement ne peut pas dépasser le montant payé (${formatMillimes(paidAmount)})`,
+      );
       return;
     }
 
     setLoading(true);
+    setAmountError(null);
     setError(null);
     try {
       await onConfirm({
@@ -73,80 +96,97 @@ export function PaymentModal({
 
   const handleFullRefund = () => {
     setKind("refund");
-    setAmountDt((paidAmount / 1000).toFixed(3));
+    setAmountDt(paidAmount / 1000);
     setNote("Remboursement intégral");
+    setAmountError(null);
     setError(null);
   };
 
-  return (
-    <Modal open={open} onClose={onClose} title="Enregistrer un paiement">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {error && <FieldError message={error} />}
+  const statusLabel = ORDER_STATUS_LABELS[orderStatus as OrderStatus]?.toLowerCase() ?? orderStatus;
 
-        <div>
-          <Label>Type de transaction</Label>
-          <Select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as PaymentKind)}
-            disabled={isClosed}
-          >
-            {!isClosed && <option value="advance">Avance (Acompte)</option>}
-            {!isClosed && <option value="balance">Règlement du solde</option>}
-            <option value="refund">Remboursement</option>
-          </Select>
-          {isClosed && (
-            <p className="mt-1 text-xs text-text-secondary">
-              Seul le remboursement est autorisé pour une commande {orderStatus}.
-            </p>
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Enregistrer un paiement"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={loading}>
+            Annuler
+          </Button>
+          <Button onClick={() => void submit()} loading={loading}>
+            Enregistrer
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        {error && <Banner status="error" title={error} />}
+
+        <Selector
+          label="Type de transaction"
+          options={isClosed ? KIND_OPTIONS.filter((o) => o.value === "refund") : KIND_OPTIONS}
+          value={kind}
+          onChange={(v) => {
+            if (!v) return;
+            setKind(v as PaymentKind);
+            setAmountError(null);
+          }}
+          isDisabled={isClosed}
+          description={
+            isClosed
+              ? `Seul le remboursement est autorisé pour une commande ${statusLabel}.`
+              : undefined
+          }
+          width="100%"
+        />
+
+        <div className="flex flex-col gap-1.5">
+          <NumberInput
+            label="Montant"
+            units="DT"
+            value={amountDt}
+            onChange={(v) => {
+              setAmountDt(v);
+              setAmountError(null);
+            }}
+            hasClear
+            min={0}
+            step={1}
+            placeholder="Ex. 25,500"
+            formatValue={(v) => dtFormat.format(v)}
+            isRequired
+            hasAutoFocus
+            description={`Payé à ce jour : ${formatMillimes(paidAmount)} · Reste à payer : ${formatMillimes(remainingAmount)}`}
+            status={amountError ? { type: "error", message: amountError } : undefined}
+            width="100%"
+          />
+          {paidAmount > 0 && kind !== "refund" && (
+            <div>
+              <Button variant="ghost" size="sm" onClick={handleFullRefund}>
+                Rembourser la totalité
+              </Button>
+            </div>
           )}
         </div>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <Label>Montant (en Dinars - DT)</Label>
-            {paidAmount > 0 && kind !== "refund" && (
-              <button
-                type="button"
-                onClick={handleFullRefund}
-                className="text-xs text-primary hover:underline"
-              >
-                Rembourser la totalité
-              </button>
-            )}
-          </div>
-          <Input
-            type="number"
-            step="0.001"
-            min="0.001"
-            placeholder="Ex: 25.500"
-            value={amountDt}
-            onChange={(e) => setAmountDt(e.target.value)}
-            required
-          />
-          <div className="mt-1 flex items-center justify-between text-xs text-text-secondary">
-            <span>Payé à ce jour: {formatMillimes(paidAmount)}</span>
-            <span>Reste à payer: {formatMillimes(remainingAmount)}</span>
-          </div>
-        </div>
+        <TextInput
+          label="Note / Référence"
+          isOptional
+          placeholder="Ex. Espèces, Virement bancaire #…"
+          value={note}
+          onChange={setNote}
+          width="100%"
+        />
 
-        <div>
-          <Label>Note / Référence (optionnel)</Label>
-          <Input
-            type="text"
-            placeholder="Ex: Espèces, Virement bancaire #..."
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
-
-        <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
-          <Button variant="secondary" type="button" onClick={onClose} disabled={loading}>
-            Annuler
-          </Button>
-          <Button variant="primary" type="submit" loading={loading}>
-            Enregistrer
-          </Button>
-        </div>
+        {/* Enter in a field submits, like before. */}
+        <button type="submit" className="sr-only" aria-hidden tabIndex={-1} />
       </form>
     </Modal>
   );

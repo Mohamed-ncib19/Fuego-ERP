@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Boxes, Plus, Search, ShoppingCart } from "lucide-react";
 import { STOCK_UNIT_LABELS, stockNameKey, type StockItem, type StockLevel } from "@fuego/shared";
 import {
@@ -20,7 +20,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { MoreMenu as AxMoreMenu } from "@astryxdesign/core/MoreMenu";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import { Button, EmptyState, ErrorState, TableSkeleton } from "@/components/ui";
+import { Button, EmptyState, ErrorState, TableSkeleton, SummaryTile } from "@/components/ui";
 import { StockGauge, StockLevelDot } from "@/components/stock/stock-level";
 import { MovementsTable } from "@/components/stock/movements-table";
 import { useStockActions } from "@/components/stock/stock-actions";
@@ -47,10 +47,16 @@ export default function StockPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string | null>(null);
 
-  const itemsQ = useStockItems({ include_archived: view === "archived" });
+  // Archived items only exist from before permanent delete; fetched so the
+  // "Archivés" filter can appear just when there are some.
+  const itemsQ = useStockItems({ include_archived: true });
   const { data: categories = [] } = useStockCategories();
   const summary = itemsQ.data?.summary;
   const alerts = summary ? summary.low + summary.out : 0;
+  const archivedCount = (itemsQ.data?.data ?? []).filter((i) => !i.is_active).length;
+  useEffect(() => {
+    if (view === "archived" && itemsQ.data && archivedCount === 0) setView("all");
+  }, [view, archivedCount, itemsQ.data]);
 
   const visible = useMemo(() => {
     const all = itemsQ.data?.data ?? [];
@@ -163,11 +169,22 @@ export default function StockPage() {
                     { type: "divider" },
                     { label: "Voir le détail", onClick: () => actions.openItem(i) },
                     { label: "Modifier", onClick: () => actions.openEdit(i) },
+                    ...(isAdmin
+                      ? [
+                          { type: "divider" as const },
+                          { label: "Supprimer", variant: "destructive" as const, onClick: () => actions.openDelete(i) },
+                        ]
+                      : []),
                   ]}
                 />
               </>
             ) : (
-              <AxButton label="Voir" size="sm" variant="ghost" onClick={() => actions.openItem(i)} />
+              <>
+                {isAdmin && (
+                  <AxButton label="Réactiver" size="sm" variant="secondary" onClick={() => actions.restore(i)} />
+                )}
+                <AxButton label="Voir" size="sm" variant="ghost" onClick={() => actions.openItem(i)} />
+              </>
             )}
           </div>
         ),
@@ -227,7 +244,7 @@ export default function StockPage() {
                   value="alert"
                   label={alerts > 0 ? `À réapprovisionner (${alerts})` : "À réapprovisionner"}
                 />
-                <SegmentedControlItem value="archived" label="Archivés" />
+                {archivedCount > 0 && <SegmentedControlItem value="archived" label={`Archivés (${archivedCount})`} />}
               </SegmentedControl>
               <div className="ml-auto flex w-full flex-wrap gap-3 sm:w-auto">
                 {categories.length > 0 && (
@@ -298,7 +315,7 @@ export default function StockPage() {
               ) : (
                 <>
                   {/* Table from md; a tappable list on phones. */}
-                  <div className="hidden overflow-x-auto md:block">
+                  <div className="hidden md:block">
                     <Table<Row>
                       data={sortedData}
                       columns={columns}
@@ -341,37 +358,6 @@ export default function StockPage() {
   );
 }
 
-function SummaryTile({
-  label,
-  value,
-  hint,
-  tone,
-  className,
-}: {
-  className?: string;
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "warning";
-}) {
-  return (
-    <Card padding={4} className={className}>
-      <Text type="supporting" color="secondary" display="block">
-        {label}
-      </Text>
-      <span
-        className={`mt-1 block text-[26px] font-semibold leading-tight tabular-nums ${tone === "warning" ? "text-warning" : ""}`}
-      >
-        {value}
-      </span>
-      {hint && (
-        <Text type="supporting" color="secondary" display="block">
-          {hint}
-        </Text>
-      )}
-    </Card>
-  );
-}
 
 const KIND_FILTERS = [
   { value: "purchase", label: "Achats" },

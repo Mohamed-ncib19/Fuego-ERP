@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { ConflictException, ForbiddenException, BadRequestException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, BadRequestException, NotFoundException } from "@nestjs/common";
 import { DbService, ensureTables } from "../db/db.service";
 import { AuditService } from "../audit/audit.service";
 import { ExpensesService } from "../expenses/expenses.service";
@@ -369,6 +369,58 @@ describe("StockService + ExpensesService integration", () => {
     await expect(
       expenses.createMaterial({ name: "toile DE jute", unit: "m", initial_quantity: kg(1), unit_price: 1 }, staff),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it("hard-deleting a material frees its name; its dépense is removed when asked", async () => {
+    const { item, expense } = await expenses.createMaterial(
+      { name: "Ruban satin", unit: "m", initial_quantity: kg(10), unit_price: 2_000 },
+      staff,
+    );
+    await stock.recordMovement(item.id, { type: "exit", quantity: kg(3) }, staff);
+
+    const usage = await expenses.materialUsage(item.id);
+    expect(usage.movements).toBe(2);
+    expect(usage.expense_total).toBe(20_000);
+
+    const res = await expenses.deleteMaterial(item.id, true, admin);
+    expect(res).toMatchObject({ deleted_expenses: 1, updated_expenses: 0 });
+    await expect(stock.getItem(item.id)).rejects.toThrow(NotFoundException);
+    await expect(expenses.get(expense!.id)).rejects.toThrow(NotFoundException);
+    expect((await stock.listMovements({ itemId: item.id })).data).toHaveLength(0);
+
+    // Same name again (any case/accents) is accepted now.
+    const again = await expenses.createMaterial({ name: "RUBAN SATIN", unit: "m" }, staff);
+    expect(again.item.name).toBe("RUBAN SATIN");
+  });
+
+  it("deleting a material keeps dépense amounts by default and only trims shared dépenses", async () => {
+    const a = await stock.createItem({ name: "Boutons nacre", unit: "unit" }, staff);
+    const b = await stock.createItem({ name: "Agrafes", unit: "unit" }, staff);
+    const shared = await expenses.create(
+      {
+        category: "materials",
+        note: "Mercerie",
+        lines: [
+          { stock_item_id: a.id, quantity: kg(100), unit_price: 100 },
+          { stock_item_id: b.id, quantity: kg(10), unit_price: 500 },
+        ],
+      },
+      staff,
+    );
+
+    // Default: the books keep the full amount, the material's line goes.
+    await expenses.deleteMaterial(a.id, false, admin);
+    const kept = await expenses.get(shared.id);
+    expect(kept.amount).toBe(15_000);
+    expect(kept.lines.map((l) => l.stock_item_id)).toEqual([b.id]);
+    expect(kept.note).toBe("Mercerie (Boutons nacre)");
+    expect(await qty(b.id)).toBe(kg(10));
+
+    // With delete_expenses on a shared dépense: only this material's share goes.
+    await expenses.deleteMaterial(b.id, true, admin);
+    const trimmed = await expenses.get(shared.id);
+    expect(trimmed.amount).toBe(10_000);
+    expect(trimmed.lines).toHaveLength(0);
   });
 
   // 10 — existing permission rule holds for edits too

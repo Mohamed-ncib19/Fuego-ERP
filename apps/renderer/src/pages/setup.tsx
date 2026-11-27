@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useForm } from "react-hook-form";
+import { Controller, useForm, type FieldError as RhfFieldError } from "react-hook-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Flame } from "lucide-react";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Banner } from "@astryxdesign/core/Banner";
 import { authApi, setupApi } from "@/lib/api/auth.api";
 import { useAuthStore } from "@/hooks/use-auth-store";
-import { Button, Input, Label, FieldError } from "@/components/ui";
 
 interface SetupForm {
   business_name: string;
@@ -13,6 +16,11 @@ interface SetupForm {
   email: string;
   password: string;
   confirm: string;
+}
+
+/** RHF error → Astryx field status. */
+function statusOf(err?: RhfFieldError) {
+  return err?.message ? { type: "error" as const, message: err.message } : undefined;
 }
 
 /**
@@ -40,11 +48,12 @@ export default function SetupPage() {
   }, [status, navigate]);
 
   const {
-    register,
+    control,
     handleSubmit,
-    watch,
     formState: { errors },
-  } = useForm<SetupForm>();
+  } = useForm<SetupForm>({
+    defaultValues: { business_name: "", full_name: "", email: "", password: "", confirm: "" },
+  });
 
   const mutation = useMutation({
     mutationFn: (values: SetupForm) =>
@@ -81,7 +90,7 @@ export default function SetupPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-2 bg-[radial-gradient(ellipse_at_top,rgb(var(--color-primary-500)/0.14),transparent_60%)] p-4">
       <div className="w-full max-w-md">
-        <div className="rounded-modal border border-border bg-surface p-8 shadow-hover">
+        <Card padding={8} elevation="high" width="100%">
           <div className="mb-6 flex flex-col items-center">
             <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-card bg-primary shadow-md">
               <Flame className="h-7 w-7 text-neutral-950" />
@@ -93,45 +102,127 @@ export default function SetupPage() {
             </p>
           </div>
 
-          {error && (
-            <div className="mb-4 rounded-btn border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-              {error}
-            </div>
-          )}
+          <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
+            {error && <Banner status="error" title={error} />}
 
-          <form onSubmit={onSubmit} className="space-y-4" noValidate>
-            <div>
-              <Label>Nom du commerce</Label>
-              <Input placeholder="Ex : Imprimerie El Fuego" {...register("business_name", { required: "Nom du commerce requis", minLength: { value: 2, message: "Minimum 2 caractères" } })} />
-              <FieldError message={errors.business_name?.message as string | undefined} />
+            <Controller
+              name="business_name"
+              control={control}
+              rules={{
+                required: "Nom du commerce requis",
+                minLength: { value: 2, message: "Minimum 2 caractères" },
+              }}
+              render={({ field }) => (
+                <TextInput
+                  label="Nom du commerce"
+                  placeholder="Ex : Imprimerie El Fuego"
+                  value={field.value}
+                  onChange={field.onChange}
+                  htmlName={field.name}
+                  hasAutoFocus
+                  width="100%"
+                  status={statusOf(errors.business_name)}
+                />
+              )}
+            />
+
+            <Controller
+              name="full_name"
+              control={control}
+              rules={{
+                required: "Nom complet requis",
+                minLength: { value: 2, message: "Minimum 2 caractères" },
+              }}
+              render={({ field }) => (
+                <TextInput
+                  label="Votre nom complet (administrateur)"
+                  placeholder="Ex : Ahmed Ben Salah"
+                  autoComplete="name"
+                  value={field.value}
+                  onChange={field.onChange}
+                  htmlName={field.name}
+                  width="100%"
+                  status={statusOf(errors.full_name)}
+                />
+              )}
+            />
+
+            <Controller
+              name="email"
+              control={control}
+              rules={{
+                required: "E-mail requis",
+                pattern: { value: /\S+@\S+\.\S+/, message: "Adresse e-mail invalide" },
+              }}
+              render={({ field }) => (
+                <TextInput
+                  label="E-mail administrateur"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="admin@commerce.tn"
+                  value={field.value}
+                  onChange={field.onChange}
+                  htmlName={field.name}
+                  width="100%"
+                  status={statusOf(errors.email)}
+                />
+              )}
+            />
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-3">
+              <Controller
+                name="password"
+                control={control}
+                rules={{
+                  required: "Mot de passe requis",
+                  minLength: { value: 8, message: "8 caractères minimum" },
+                }}
+                render={({ field }) => (
+                  <TextInput
+                    label="Mot de passe"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="8 caractères min."
+                    value={field.value}
+                    onChange={field.onChange}
+                    htmlName={field.name}
+                    width="100%"
+                    status={statusOf(errors.password)}
+                  />
+                )}
+              />
+              <Controller
+                name="confirm"
+                control={control}
+                rules={{ required: "Confirmation requise" }}
+                render={({ field }) => (
+                  <TextInput
+                    label="Confirmation"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Répétez le mot de passe"
+                    value={field.value}
+                    onChange={field.onChange}
+                    htmlName={field.name}
+                    width="100%"
+                    status={statusOf(errors.confirm)}
+                  />
+                )}
+              />
             </div>
-            <div>
-              <Label>Votre nom complet (administrateur)</Label>
-              <Input placeholder="Ex : Ahmed Ben Salah" {...register("full_name", { required: "Nom complet requis", minLength: { value: 2, message: "Minimum 2 caractères" } })} />
-              <FieldError message={errors.full_name?.message as string | undefined} />
-            </div>
-            <div>
-              <Label>E-mail administrateur</Label>
-              <Input type="email" placeholder="admin@commerce.tn" {...register("email", { required: "E-mail requis", pattern: { value: /\S+@\S+\.\S+/, message: "Adresse e-mail invalide" } })} />
-              <FieldError message={errors.email?.message as string | undefined} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Mot de passe</Label>
-                <Input type="password" placeholder="8 caractères min." {...register("password", { required: "Mot de passe requis", minLength: { value: 8, message: "8 caractères minimum" } })} />
-                <FieldError message={errors.password?.message as string | undefined} />
-              </div>
-              <div>
-                <Label>Confirmation</Label>
-                <Input type="password" placeholder="Répétez le mot de passe" {...register("confirm", { required: "Confirmation requise" })} />
-                <FieldError message={errors.confirm?.message as string | undefined} />
-              </div>
-            </div>
-            <Button type="submit" className="w-full" loading={mutation.isPending}>
+
+            <Button
+              label="Créer mon commerce"
+              type="submit"
+              variant="primary"
+              width="100%"
+              isLoading={mutation.isPending}
+            >
               Créer mon commerce
             </Button>
           </form>
-        </div>
+        </Card>
       </div>
     </div>
   );

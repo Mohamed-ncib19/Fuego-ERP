@@ -1,43 +1,23 @@
-import { DateInput } from "@astryxdesign/core/DateInput";
-import { useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  Receipt,
-  Plus,
-  Trash2,
-  Calendar,
-  Filter,
-  ArrowUpRight,
-  ArrowDownRight,
-  Layers,
-  ChevronLeft,
-  ChevronRight,
-  Pencil,
-  Boxes,
-} from "lucide-react";
+import { DollarSign, Receipt, Plus, Trash2, Pencil, Boxes } from "lucide-react";
+import { Table, pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { TabList, Tab } from "@astryxdesign/core/TabList";
+import { Selector } from "@astryxdesign/core/Selector";
+import { DateInput } from "@astryxdesign/core/DateInput";
+import { Pagination } from "@astryxdesign/core/Pagination";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Card } from "@astryxdesign/core/Card";
+import { Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { financeApi, expensesApi, type PaymentReceiptRow } from "@/lib/api/finance.api";
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { ExpenseFormModal } from "@/components/expenses/expense-form-modal";
 import { useToast } from "@/hooks/use-toast";
 import { formatMillimes, formatDate, formatDateTime, formatQty, type IsoDate } from "@/lib/format";
-import {
-  Button,
-  Card,
-  Input,
-  Select,
-  Label,
-  ConfirmDialog,
-  Badge,
-  PageLoader,
-  EmptyState,
-  SegmentedTabs,
-  TableSkeleton,
-} from "@/components/ui";
+import { Button, ConfirmDialog, Badge, PageLoader, EmptyState, TableSkeleton, SummaryTile } from "@/components/ui";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABELS,
@@ -47,6 +27,32 @@ import {
 } from "@fuego/shared";
 
 type FinanceTab = "overview" | "expenses" | "payments";
+type ExpenseRow = Expense & Record<string, unknown>;
+type PaymentRow = PaymentReceiptRow & Record<string, unknown>;
+
+const PAGE_SIZE = 15;
+
+const CATEGORY_OPTIONS = EXPENSE_CATEGORIES.map((c) => ({
+  value: c,
+  label: EXPENSE_CATEGORY_LABELS[c],
+}));
+
+const PAYMENT_KIND_OPTIONS = [
+  { value: "advance", label: "Acompte" },
+  { value: "balance", label: "Règlement du solde" },
+  { value: "refund", label: "Remboursement" },
+];
+
+const PAYMENT_KIND_BADGE: Record<string, { tone: "info" | "success" | "danger"; label: string }> = {
+  advance: { tone: "info", label: "Acompte" },
+  balance: { tone: "success", label: "Solde" },
+  refund: { tone: "danger", label: "Remboursement" },
+};
+
+function paymentKindBadge(kind: string) {
+  const k = PAYMENT_KIND_BADGE[kind] ?? PAYMENT_KIND_BADGE.refund;
+  return <Badge tone={k.tone}>{k.label}</Badge>;
+}
 
 export default function FinancesPage() {
   const { user } = useAuthStore();
@@ -70,7 +76,8 @@ export default function FinancesPage() {
 
   // Expense form: null = closed, {expense: null} = create, {expense} = edit
   const [expenseForm, setExpenseForm] = useState<{ expense: Expense | null } | null>(null);
-  const canChange = (exp: Expense) => isAdmin || exp.recorded_by === user?.id;
+  const userId = user?.id;
+  const canChange = (exp: Expense) => isAdmin || exp.recorded_by === userId;
 
   // Delete Expense Dialog State
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
@@ -89,7 +96,7 @@ export default function FinancesPage() {
         from: expenseFrom || undefined,
         to: expenseTo || undefined,
         page: expensePage,
-        limit: 15,
+        limit: PAGE_SIZE,
       }),
     enabled: activeTab === "expenses",
   });
@@ -102,7 +109,7 @@ export default function FinancesPage() {
         from: paymentFrom || undefined,
         to: paymentTo || undefined,
         page: paymentPage,
-        limit: 15,
+        limit: PAGE_SIZE,
       }),
     enabled: activeTab === "payments",
   });
@@ -120,6 +127,151 @@ export default function FinancesPage() {
     onError: (err: any) => toast.error(err.message || "Impossible de supprimer la dépense"),
   });
 
+  const expensesFiltered = expenseCategory !== "" || expenseFrom !== "" || expenseTo !== "";
+  const clearExpenseFilters = () => {
+    setExpenseCategory("");
+    setExpenseFrom("");
+    setExpenseTo("");
+    setExpensePage(1);
+  };
+  const paymentsFiltered = paymentKind !== "" || paymentFrom !== "" || paymentTo !== "";
+  const clearPaymentFilters = () => {
+    setPaymentKind("");
+    setPaymentFrom("");
+    setPaymentTo("");
+    setPaymentPage(1);
+  };
+
+  const expenseColumns = useMemo<TableColumn<ExpenseRow>[]>(
+    () => [
+      {
+        key: "date",
+        header: "Date",
+        width: pixel(120),
+        renderCell: (exp) => (
+          <span className="whitespace-nowrap font-medium text-text-secondary">{formatDate(exp.date)}</span>
+        ),
+      },
+      {
+        key: "category",
+        header: "Catégorie",
+        width: pixel(180),
+        renderCell: (exp) => (
+          <Badge tone="neutral">{EXPENSE_CATEGORY_LABELS[exp.category] || exp.category}</Badge>
+        ),
+      },
+      {
+        key: "note",
+        header: "Note / Description",
+        width: proportional(3),
+        renderCell: (exp) => <ExpenseDescription expense={exp} />,
+      },
+      {
+        key: "amount",
+        header: "Montant",
+        width: pixel(150),
+        align: "end",
+        renderCell: (exp) => (
+          <span className="whitespace-nowrap font-semibold tabular-nums text-danger">
+            -{formatMillimes(exp.amount)}
+          </span>
+        ),
+      },
+      {
+        key: "recorded_by_label",
+        header: "Enregistré par",
+        width: pixel(160),
+        renderCell: (exp) => (
+          <Text type="supporting" color="secondary" maxLines={1}>
+            {exp.recorded_by_label}
+          </Text>
+        ),
+      },
+      {
+        key: "actions",
+        header: "",
+        width: pixel(96),
+        align: "end",
+        renderCell: (exp) =>
+          isAdmin || exp.recorded_by === userId ? (
+            <ExpenseActions
+              onEdit={() => setExpenseForm({ expense: exp })}
+              onDelete={() => setDeletingExpense(exp)}
+            />
+          ) : null,
+      },
+    ],
+    [isAdmin, userId],
+  );
+
+  const paymentColumns = useMemo<TableColumn<PaymentRow>[]>(
+    () => [
+      {
+        key: "created_at",
+        header: "Date & heure",
+        width: pixel(160),
+        renderCell: (p) => (
+          <Text type="supporting" color="secondary">
+            {formatDateTime(p.created_at)}
+          </Text>
+        ),
+      },
+      {
+        key: "ticket_no",
+        header: "Ticket N°",
+        width: pixel(120),
+        renderCell: (p) =>
+          p.ticket_no ? (
+            <Link to={`/commandes/${p.order_id}`} className="font-semibold text-primary hover:underline">
+              {p.ticket_no}
+            </Link>
+          ) : (
+            <Text color="secondary">—</Text>
+          ),
+      },
+      {
+        key: "customer_name",
+        header: "Client",
+        width: proportional(2),
+        renderCell: (p) => <span className="font-medium">{p.customer_name || "Client anonyme"}</span>,
+      },
+      {
+        key: "kind",
+        header: "Type",
+        width: pixel(150),
+        renderCell: (p) => paymentKindBadge(p.kind),
+      },
+      {
+        key: "amount",
+        header: "Montant",
+        width: pixel(150),
+        align: "end",
+        renderCell: (p) => <PaymentAmount payment={p} />,
+      },
+      {
+        key: "note",
+        header: "Note",
+        width: proportional(2),
+        renderCell: (p) => (
+          <Text type="supporting" color="secondary">
+            {p.note || "—"}
+          </Text>
+        ),
+      },
+      {
+        key: "recorded_by_label",
+        header: "Reçu par",
+        width: pixel(150),
+        renderCell: (p) => (
+          <Text type="supporting" color="secondary" maxLines={1}>
+            {p.recorded_by_label}
+          </Text>
+        ),
+      },
+    ],
+    [],
+  );
+
   if (statsLoading && !stats) {
     return (
       <DashboardShell title="Finances & Comptabilité">
@@ -132,620 +284,409 @@ export default function FinancesPage() {
     <DashboardShell
       title="Finances & Comptabilité"
       subtitle="Recettes, charges, trésorerie et rentabilité en temps réel"
-    >
-      {/* Header Actions */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <SegmentedTabs<FinanceTab>
-          value={activeTab}
-          onChange={setActiveTab}
-          options={[
-            { value: "overview", label: "Vue d'ensemble" },
-            { value: "expenses", label: "Dépenses & Charges" },
-            { value: "payments", label: "Journal des encaissements" },
-          ]}
-        />
-
-        <Button onClick={() => setExpenseForm({ expense: null })} className="shadow-sm">
-          <Plus className="h-4 w-4" />
+      actions={
+        <Button icon={<Plus className="h-4 w-4" />} onClick={() => setExpenseForm({ expense: null })}>
           Déclarer une dépense
         </Button>
-      </div>
+      }
+    >
+      <div className="flex flex-col gap-5">
+        <TabList value={activeTab} onChange={(v) => setActiveTab(v as FinanceTab)} hasDivider>
+          <Tab value="overview" label="Vue d'ensemble" />
+          <Tab value="expenses" label="Dépenses & Charges" />
+          <Tab value="payments" label="Journal des encaissements" />
+        </TabList>
 
-      {/* TAB 1: OVERVIEW */}
-      {activeTab === "overview" && stats && (
-        <div className="space-y-6">
-          {/* Today's Section */}
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
-                Activité d'aujourd'hui
-              </h2>
-              <span className="text-xs text-text-secondary">
-                {new Date().toLocaleDateString("fr-FR", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Card className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-secondary">
-                    Recettes encaissées
-                  </span>
-                  <div className="rounded-full bg-success/10 p-2 text-success">
-                    <ArrowDownRight className="h-4 w-4" />
-                  </div>
-                </div>
-                <div className="mt-2 text-2xl font-bold text-success">
-                  +{formatMillimes(stats.today.revenue)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Acomptes & soldes reçus ce jour
-                </div>
-              </Card>
-
-              <Card className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-secondary">
-                    Dépenses engagées
-                  </span>
-                  <div className="rounded-full bg-danger/10 p-2 text-danger">
-                    <ArrowUpRight className="h-4 w-4" />
-                  </div>
-                </div>
-                <div className="mt-2 text-2xl font-bold text-danger">
-                  -{formatMillimes(stats.today.expenses)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Charges et achats payés ce jour
-                </div>
-              </Card>
-
-              <Card className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-secondary">
-                    Bénéfice net du jour
-                  </span>
-                  <div
-                    className={`rounded-full p-2 ${
-                      stats.today.net_profit >= 0
-                        ? "bg-primary/10 text-primary"
-                        : "bg-danger/10 text-danger"
-                    }`}
-                  >
-                    <DollarSign className="h-4 w-4" />
-                  </div>
-                </div>
-                <div
-                  className={`mt-2 text-2xl font-bold ${
-                    stats.today.net_profit >= 0 ? "text-primary" : "text-danger"
-                  }`}
-                >
-                  {formatMillimes(stats.today.net_profit)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Recettes moins dépenses
-                </div>
-              </Card>
-
-              <Card className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-secondary">
-                    Commandes du jour
-                  </span>
-                  <div className="rounded-full bg-surface-2 p-2 text-text-secondary">
-                    <Layers className="h-4 w-4" />
-                  </div>
-                </div>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-text-primary">
-                    {stats.today.orders_count}
-                  </span>
-                  <span className="text-xs text-text-secondary">créées</span>
-                  <span className="text-sm font-semibold text-success">
-                    ({stats.today.delivered_count} livrées)
-                  </span>
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Activité atelier
-                </div>
-              </Card>
-            </div>
-          </div>
-
-          {/* Overall Business Health Cards */}
-          <div>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              Situation globale & Créances
-            </h2>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Card className="p-4">
-                <div className="text-xs font-medium text-text-secondary">
-                  Chiffre d'affaires cumulé
-                </div>
-                <div className="mt-2 text-xl font-bold text-text-primary">
-                  {formatMillimes(stats.overall.total_revenue)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Sur {stats.overall.total_orders} commandes
-                </div>
-              </Card>
-
-              <Card className="p-4">
-                <div className="text-xs font-medium text-text-secondary">
-                  Dépenses totales
-                </div>
-                <div className="mt-2 text-xl font-bold text-danger">
-                  {formatMillimes(stats.overall.total_expenses)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Total historique
-                </div>
-              </Card>
-
-              <Card className="p-4 border-warning/40 bg-warning/5">
-                <div className="text-xs font-medium text-warning-700 dark:text-warning">
-                  Reste à encaisser (Créances)
-                </div>
-                <div className="mt-2 text-xl font-bold text-warning-800 dark:text-warning">
-                  {formatMillimes(stats.overall.outstanding_balances)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Dû par les clients sur commandes actives
-                </div>
-              </Card>
-
-              <Card className="p-4 border-info/40 bg-info/5">
-                <div className="text-xs font-medium text-info-700 dark:text-info">
-                  Acomptes en cours de détention
-                </div>
-                <div className="mt-2 text-xl font-bold text-info-800 dark:text-info">
-                  {formatMillimes(stats.overall.advances_held)}
-                </div>
-                <div className="mt-1 text-xs text-text-secondary">
-                  Garanties sur commandes non livrées
-                </div>
-              </Card>
-            </div>
-          </div>
-
-          {/* 14-Day Visual Trend Chart */}
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-text-primary">
-                  Tendance des flux de trésorerie (14 derniers jours)
-                </h3>
-                <p className="text-xs text-text-secondary">
-                  Comparaison quotidienne des encaissements (vert) et des dépenses (rouge)
-                </p>
+        {/* TAB 1: OVERVIEW */}
+        {activeTab === "overview" && stats && (
+          <div className="flex flex-col gap-6">
+            <section>
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+                <Text as="h2" type="label" color="secondary">
+                  Activité d'aujourd'hui
+                </Text>
+                <Text type="supporting" color="secondary">
+                  {new Date().toLocaleDateString("fr-FR", {
+                    weekday: "long",
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </Text>
               </div>
-              <div className="flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-3 w-3 rounded-full bg-success" />
-                  <span>Recettes</span>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryTile
+                  label="Recettes encaissées"
+                  value={`+${formatMillimes(stats.today.revenue)}`}
+                  tone="success"
+                  hint="Acomptes & soldes reçus ce jour"
+                />
+                <SummaryTile
+                  label="Dépenses engagées"
+                  value={`-${formatMillimes(stats.today.expenses)}`}
+                  tone="danger"
+                  hint="Charges et achats payés ce jour"
+                />
+                <SummaryTile
+                  label="Bénéfice net du jour"
+                  value={formatMillimes(stats.today.net_profit)}
+                  tone={stats.today.net_profit >= 0 ? "primary" : "danger"}
+                  hint="Recettes moins dépenses"
+                />
+                <SummaryTile
+                  label="Commandes du jour"
+                  value={String(stats.today.orders_count)}
+                  hint={`créées · dont ${stats.today.delivered_count} livrée(s)`}
+                />
+              </div>
+            </section>
+
+            <section>
+              <Text as="h2" type="label" color="secondary" display="block">
+                Situation globale & Créances
+              </Text>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <SummaryTile
+                  label="Chiffre d'affaires cumulé"
+                  value={formatMillimes(stats.overall.total_revenue)}
+                  hint={`Sur ${stats.overall.total_orders} commandes`}
+                />
+                <SummaryTile
+                  label="Dépenses totales"
+                  value={formatMillimes(stats.overall.total_expenses)}
+                  tone="danger"
+                  hint="Total historique"
+                />
+                <SummaryTile
+                  label="Reste à encaisser (Créances)"
+                  value={formatMillimes(stats.overall.outstanding_balances)}
+                  tone="warning"
+                  hint="Dû par les clients sur commandes actives"
+                />
+                <SummaryTile
+                  label="Acomptes en cours de détention"
+                  value={formatMillimes(stats.overall.advances_held)}
+                  tone="info"
+                  hint="Garanties sur commandes non livrées"
+                />
+              </div>
+            </section>
+
+            {/* 14-Day Visual Trend Chart */}
+            <Card padding={5}>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <Text as="h3" type="large" weight="semibold" display="block">
+                    Tendance des flux de trésorerie (14 derniers jours)
+                  </Text>
+                  <Text type="supporting" color="secondary" display="block">
+                    Comparaison quotidienne des encaissements (vert) et des dépenses (rouge)
+                  </Text>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="h-3 w-3 rounded-full bg-danger" />
-                  <span>Dépenses</span>
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-full bg-success" />
+                    <span>Recettes</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-full bg-danger" />
+                    <span>Dépenses</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Custom Bar Trend Representation */}
-            <div className="mt-6 flex h-48 items-end gap-2 border-b border-border pb-2 pt-6">
-              {(() => {
-                const maxVal = Math.max(
-                  ...stats.trend.flatMap((t) => [t.revenue, t.expenses]),
-                  1000,
-                );
-
-                return stats.trend.map((day) => {
-                  const revHeight = Math.max(4, Math.round((day.revenue / maxVal) * 100));
-                  const expHeight = Math.max(4, Math.round((day.expenses / maxVal) * 100));
-                  const dayName = new Date(day.date).toLocaleDateString("fr-FR", {
-                    day: "2-digit",
-                    month: "2-digit",
-                  });
-
-                  return (
-                    <div
-                      key={day.date}
-                      className="group relative flex flex-1 flex-col items-center justify-end h-full"
-                    >
-                      {/* Tooltip on hover */}
-                      <div className="pointer-events-none absolute -top-12 z-20 hidden rounded bg-surface border border-border px-2 py-1 text-[11px] shadow-lg group-hover:block whitespace-nowrap text-text-primary">
-                        <div className="font-semibold">{day.date}</div>
-                        <div className="text-success">+{formatMillimes(day.revenue)}</div>
-                        <div className="text-danger">-{formatMillimes(day.expenses)}</div>
-                      </div>
-
-                      {/* Bar Pair */}
-                      <div className="flex min-h-0 w-full flex-1 items-end justify-center gap-1">
-                        <div
-                          style={{ height: `${day.revenue > 0 ? revHeight : 4}%` }}
-                          className={`w-1/2 rounded-t transition-all ${
-                            day.revenue > 0 ? "bg-success hover:opacity-80" : "bg-border/40"
-                          }`}
-                        />
-                        <div
-                          style={{ height: `${day.expenses > 0 ? expHeight : 4}%` }}
-                          className={`w-1/2 rounded-t transition-all ${
-                            day.expenses > 0 ? "bg-danger hover:opacity-80" : "bg-border/40"
-                          }`}
-                        />
-                      </div>
-                      <span className="mt-2 text-[10px] text-text-secondary">{dayName}</span>
-                    </div>
+              {/* Custom Bar Trend Representation */}
+              <div className="mt-6 flex h-48 items-end gap-2 border-b border-border pb-2 pt-6">
+                {(() => {
+                  const maxVal = Math.max(
+                    ...stats.trend.flatMap((t) => [t.revenue, t.expenses]),
+                    1000,
                   );
-                });
-              })()}
-            </div>
-          </Card>
-        </div>
-      )}
 
-      {/* TAB 2: EXPENSES */}
-      {activeTab === "expenses" && (
-        <div className="space-y-4">
-          {/* Filters Bar */}
-          <Card className="p-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <Label>Catégorie</Label>
-                <Select
-                  value={expenseCategory}
-                  onChange={(e) => {
-                    setExpenseCategory(e.target.value);
-                    setExpensePage(1);
-                  }}
-                >
-                  <option value="">Toutes les catégories</option>
-                  {EXPENSE_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {EXPENSE_CATEGORY_LABELS[c]}
-                    </option>
-                  ))}
-                </Select>
+                  return stats.trend.map((day) => {
+                    const revHeight = Math.max(4, Math.round((day.revenue / maxVal) * 100));
+                    const expHeight = Math.max(4, Math.round((day.expenses / maxVal) * 100));
+                    const dayName = new Date(day.date).toLocaleDateString("fr-FR", {
+                      day: "2-digit",
+                      month: "2-digit",
+                    });
+
+                    return (
+                      <div
+                        key={day.date}
+                        className="group relative flex flex-1 flex-col items-center justify-end h-full"
+                      >
+                        {/* Tooltip on hover */}
+                        <div className="pointer-events-none absolute -top-12 z-20 hidden rounded bg-surface border border-border px-2 py-1 text-[11px] shadow-lg group-hover:block whitespace-nowrap text-text-primary">
+                          <div className="font-semibold">{day.date}</div>
+                          <div className="text-success">+{formatMillimes(day.revenue)}</div>
+                          <div className="text-danger">-{formatMillimes(day.expenses)}</div>
+                        </div>
+
+                        {/* Bar Pair */}
+                        <div className="flex min-h-0 w-full flex-1 items-end justify-center gap-1">
+                          <div
+                            style={{ height: `${day.revenue > 0 ? revHeight : 4}%` }}
+                            className={`w-1/2 rounded-t transition-all ${
+                              day.revenue > 0 ? "bg-success hover:opacity-80" : "bg-border/40"
+                            }`}
+                          />
+                          <div
+                            style={{ height: `${day.expenses > 0 ? expHeight : 4}%` }}
+                            className={`w-1/2 rounded-t transition-all ${
+                              day.expenses > 0 ? "bg-danger hover:opacity-80" : "bg-border/40"
+                            }`}
+                          />
+                        </div>
+                        <span className="mt-2 text-[10px] text-text-secondary">{dayName}</span>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
+            </Card>
+          </div>
+        )}
 
+        {/* TAB 2: EXPENSES */}
+        {activeTab === "expenses" && (
+          <div className="flex flex-col gap-4">
+            <FilterBar
+              total={expensesRes ? formatMillimes(expensesRes.totalAmount) : "…"}
+              totalLabel="Total dépenses filtré"
+              totalTone="danger"
+            >
+              <Selector
+                label="Catégorie"
+                placeholder="Toutes les catégories"
+                options={CATEGORY_OPTIONS}
+                value={expenseCategory || null}
+                onChange={(v) => {
+                  setExpenseCategory(v ?? "");
+                  setExpensePage(1);
+                }}
+                hasClear
+                width="100%"
+              />
               <DateInput
                 label="Date de début"
                 value={(expenseFrom || undefined) as IsoDate | undefined}
                 onChange={(v) => {
-                    setExpenseFrom((v ?? ""));
-                    setExpensePage(1);
-                  }}
+                  setExpenseFrom(v ?? "");
+                  setExpensePage(1);
+                }}
                 format="date"
                 hasClear
                 width="100%"
               />
-
               <DateInput
                 label="Date de fin"
                 value={(expenseTo || undefined) as IsoDate | undefined}
                 onChange={(v) => {
-                    setExpenseTo((v ?? ""));
-                    setExpensePage(1);
-                  }}
+                  setExpenseTo(v ?? "");
+                  setExpensePage(1);
+                }}
                 format="date"
                 hasClear
                 width="100%"
               />
+            </FilterBar>
 
-              <div className="flex flex-col justify-end">
-                <div className="rounded-md border border-border bg-surface-2 p-2 text-right">
-                  <span className="text-xs text-text-secondary">Total dépenses filtré : </span>
-                  <span className="font-bold text-danger">
-                    {expensesRes ? formatMillimes(expensesRes.totalAmount) : "..."}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Expenses Table */}
-          <Card className="overflow-hidden">
-            {expensesLoading ? (
-              <TableSkeleton rows={6} cols={5} />
-            ) : !expensesRes || expensesRes.data.length === 0 ? (
-              <EmptyState
-                icon={<Receipt className="h-10 w-10" />}
-                title="Aucune dépense enregistrée"
-                description="Ajoutez une charge ou ajustez vos filtres de recherche."
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
-                    <tr>
-                      <th className="px-4 py-3">Date</th>
-                      <th className="px-4 py-3">Catégorie</th>
-                      <th className="px-4 py-3">Note / Description</th>
-                      <th className="px-4 py-3 text-right">Montant</th>
-                      <th className="px-4 py-3">Enregistré par</th>
-                      <th className="px-4 py-3 text-right">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
+            <Card padding={0}>
+              {expensesLoading ? (
+                <TableSkeleton rows={6} cols={5} />
+              ) : !expensesRes || expensesRes.data.length === 0 ? (
+                <EmptyState
+                  icon={<Receipt className="h-10 w-10" />}
+                  title={expensesFiltered ? "Aucune dépense ne correspond" : "Aucune dépense enregistrée"}
+                  description={
+                    expensesFiltered
+                      ? "Ajustez ou effacez vos filtres de recherche."
+                      : "Déclarez une charge pour qu'elle apparaisse ici."
+                  }
+                  action={
+                    expensesFiltered ? (
+                      <Button variant="secondary" onClick={clearExpenseFilters}>
+                        Effacer les filtres
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <>
+                  <div className="hidden md:block">
+                    <Table<ExpenseRow>
+                      data={expensesRes.data as ExpenseRow[]}
+                      columns={expenseColumns}
+                      idKey="id"
+                      hasHover
+                      verticalAlign="middle"
+                    />
+                  </div>
+                  <ul className="divide-y divide-border md:hidden">
                     {expensesRes.data.map((exp) => (
-                      <tr key={exp.id} className="hover:bg-surface-2/50 transition-colors">
-                        <td className="whitespace-nowrap px-4 py-3 text-text-secondary font-medium">
-                          {formatDate(exp.date)}
-                        </td>
-                        <td className="px-4 py-3">
+                      <li key={exp.id} className="flex flex-col gap-2 px-4 py-3">
+                        <span className="flex items-center justify-between gap-3">
                           <Badge tone="neutral">
                             {EXPENSE_CATEGORY_LABELS[exp.category] || exp.category}
                           </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-text-primary">
-                          {exp.note || (exp.lines.length === 0 && <span className="italic text-text-secondary">—</span>)}
-                          {exp.lines.length > 0 && (
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                              <span
-                                className="inline-flex items-center gap-1 text-[11px] font-medium text-primary"
-                                title="Matières ajoutées au stock"
-                              >
-                                <Boxes className="h-3.5 w-3.5" />
-                                Stock
-                              </span>
-                              {exp.lines.map((l) => (
-                                <span
-                                  key={l.id}
-                                  className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[11px] tabular-nums text-text-secondary"
-                                >
-                                  {l.item_name} · {formatQty(l.quantity, l.item_unit)}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right font-bold text-danger">
-                          -{formatMillimes(exp.amount)}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-text-secondary">
-                          {exp.recorded_by_label}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right">
+                          <span className="shrink-0 font-semibold tabular-nums text-danger">
+                            -{formatMillimes(exp.amount)}
+                          </span>
+                        </span>
+                        <ExpenseDescription expense={exp} />
+                        <span className="flex items-center justify-between gap-3">
+                          <Text type="supporting" color="secondary">
+                            {formatDate(exp.date)} · {exp.recorded_by_label}
+                          </Text>
                           {canChange(exp) && (
-                            <div className="flex justify-end gap-1">
-                              <button
-                                onClick={() => setExpenseForm({ expense: exp })}
-                                className="rounded p-1 text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
-                                title="Modifier la dépense"
-                                aria-label="Modifier la dépense"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => setDeletingExpense(exp)}
-                                className="rounded p-1 text-text-secondary transition-colors hover:bg-danger/10 hover:text-danger"
-                                title="Supprimer la dépense"
-                                aria-label="Supprimer la dépense"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
+                            <ExpenseActions
+                              onEdit={() => setExpenseForm({ expense: exp })}
+                              onDelete={() => setDeletingExpense(exp)}
+                            />
                           )}
-                        </td>
-                      </tr>
+                        </span>
+                      </li>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  </ul>
+                </>
+              )}
 
-            {/* Pagination */}
-            {expensesRes && expensesRes.meta.totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-text-secondary">
-                <span>
-                  Page {expensesRes.meta.page} sur {expensesRes.meta.totalPages} (
-                  {expensesRes.meta.total} résultats)
-                </span>
-                <div className="flex gap-1">
-                  <Button
-                    variant="secondary"
-                    disabled={expensesRes.meta.page <= 1}
-                    onClick={() => setExpensePage((p) => Math.max(1, p - 1))}
-                    className="p-1.5"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={expensesRes.meta.page >= expensesRes.meta.totalPages}
-                    onClick={() => setExpensePage((p) => p + 1)}
-                    className="p-1.5"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
+              {expensesRes && expensesRes.meta.totalPages > 1 && (
+                <PagerFooter
+                  page={expensesRes.meta.page}
+                  total={expensesRes.meta.total}
+                  noun="résultats"
+                  onChange={setExpensePage}
+                />
+              )}
+            </Card>
+          </div>
+        )}
 
-      {/* TAB 3: PAYMENTS JOURNAL */}
-      {activeTab === "payments" && (
-        <div className="space-y-4">
-          {/* Filters Bar */}
-          <Card className="p-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <Label>Type de paiement</Label>
-                <Select
-                  value={paymentKind}
-                  onChange={(e) => {
-                    setPaymentKind(e.target.value);
-                    setPaymentPage(1);
-                  }}
-                >
-                  <option value="">Tous les types</option>
-                  <option value="advance">Acompte</option>
-                  <option value="balance">Règlement du solde</option>
-                  <option value="refund">Remboursement</option>
-                </Select>
-              </div>
-
+        {/* TAB 3: PAYMENTS JOURNAL */}
+        {activeTab === "payments" && (
+          <div className="flex flex-col gap-4">
+            <FilterBar
+              total={paymentsRes ? formatMillimes(paymentsRes.totalAmount) : "…"}
+              totalLabel="Total net encaissé"
+              totalTone="success"
+            >
+              <Selector
+                label="Type de paiement"
+                placeholder="Tous les types"
+                options={PAYMENT_KIND_OPTIONS}
+                value={paymentKind || null}
+                onChange={(v) => {
+                  setPaymentKind(v ?? "");
+                  setPaymentPage(1);
+                }}
+                hasClear
+                width="100%"
+              />
               <DateInput
                 label="Date de début"
                 value={(paymentFrom || undefined) as IsoDate | undefined}
                 onChange={(v) => {
-                    setPaymentFrom((v ?? ""));
-                    setPaymentPage(1);
-                  }}
+                  setPaymentFrom(v ?? "");
+                  setPaymentPage(1);
+                }}
                 format="date"
                 hasClear
                 width="100%"
               />
-
               <DateInput
                 label="Date de fin"
                 value={(paymentTo || undefined) as IsoDate | undefined}
                 onChange={(v) => {
-                    setPaymentTo((v ?? ""));
-                    setPaymentPage(1);
-                  }}
+                  setPaymentTo(v ?? "");
+                  setPaymentPage(1);
+                }}
                 format="date"
                 hasClear
                 width="100%"
               />
+            </FilterBar>
 
-              <div className="flex flex-col justify-end">
-                <div className="rounded-md border border-border bg-surface-2 p-2 text-right">
-                  <span className="text-xs text-text-secondary">Total net encaissé : </span>
-                  <span className="font-bold text-success">
-                    {paymentsRes ? formatMillimes(paymentsRes.totalAmount) : "..."}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Payments Table */}
-          <Card className="overflow-hidden">
-            {paymentsLoading ? (
-              <TableSkeleton rows={6} cols={6} />
-            ) : !paymentsRes || paymentsRes.data.length === 0 ? (
-              <EmptyState
-                icon={<DollarSign className="h-10 w-10" />}
-                title="Aucun encaissement trouvé"
-                description="Les encaissements enregistrés sur les commandes s'afficheront ici."
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
-                    <tr>
-                      <th className="px-4 py-3">Date & Heure</th>
-                      <th className="px-4 py-3">Ticket N°</th>
-                      <th className="px-4 py-3">Client</th>
-                      <th className="px-4 py-3">Type</th>
-                      <th className="px-4 py-3 text-right">Montant</th>
-                      <th className="px-4 py-3">Note</th>
-                      <th className="px-4 py-3">Reçu par</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {paymentsRes.data.map((p) => {
-                      const isRefund = p.kind === "refund";
-                      return (
-                        <tr key={p.id} className="hover:bg-surface-2/50 transition-colors">
-                          <td className="whitespace-nowrap px-4 py-3 text-xs text-text-secondary">
-                            {formatDateTime(p.created_at)}
-                          </td>
-                          <td className="px-4 py-3 font-semibold">
+            <Card padding={0}>
+              {paymentsLoading ? (
+                <TableSkeleton rows={6} cols={6} />
+              ) : !paymentsRes || paymentsRes.data.length === 0 ? (
+                <EmptyState
+                  icon={<DollarSign className="h-10 w-10" />}
+                  title={paymentsFiltered ? "Aucun encaissement ne correspond" : "Aucun encaissement trouvé"}
+                  description={
+                    paymentsFiltered
+                      ? "Ajustez ou effacez vos filtres de recherche."
+                      : "Les encaissements enregistrés sur les commandes s'afficheront ici."
+                  }
+                  action={
+                    paymentsFiltered ? (
+                      <Button variant="secondary" onClick={clearPaymentFilters}>
+                        Effacer les filtres
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <>
+                  <div className="hidden md:block">
+                    <Table<PaymentRow>
+                      data={paymentsRes.data as PaymentRow[]}
+                      columns={paymentColumns}
+                      idKey="id"
+                      hasHover
+                      verticalAlign="middle"
+                    />
+                  </div>
+                  <ul className="divide-y divide-border md:hidden">
+                    {paymentsRes.data.map((p) => (
+                      <li key={p.id} className="flex flex-col gap-1.5 px-4 py-3">
+                        <span className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 truncate font-medium">
                             {p.ticket_no ? (
                               <Link
                                 to={`/commandes/${p.order_id}`}
-                                className="text-primary hover:underline"
+                                className="font-semibold text-primary hover:underline"
                               >
                                 {p.ticket_no}
                               </Link>
                             ) : (
-                              <span className="text-text-secondary">—</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 font-medium text-text-primary">
-                            {p.customer_name || "Client anonyme"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <Badge
-                              tone={
-                                p.kind === "advance"
-                                  ? "info"
-                                  : p.kind === "balance"
-                                    ? "success"
-                                    : "danger"
-                              }
-                            >
-                              {p.kind === "advance"
-                                ? "Acompte"
-                                : p.kind === "balance"
-                                  ? "Solde"
-                                  : "Remboursement"}
-                            </Badge>
-                          </td>
-                          <td
-                            className={`whitespace-nowrap px-4 py-3 text-right font-bold ${
-                              isRefund ? "text-danger" : "text-success"
-                            }`}
-                          >
-                            {isRefund ? "-" : "+"}
-                            {formatMillimes(p.amount)}
-                          </td>
-                          <td className="px-4 py-3 text-xs text-text-secondary">
-                            {p.note || "—"}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-xs text-text-secondary">
-                            {p.recorded_by_label}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                              <Text color="secondary">—</Text>
+                            )}{" "}
+                            · {p.customer_name || "Client anonyme"}
+                          </span>
+                          <PaymentAmount payment={p} />
+                        </span>
+                        <span className="flex items-center justify-between gap-3">
+                          <Text type="supporting" color="secondary">
+                            {formatDateTime(p.created_at)} · {p.recorded_by_label}
+                          </Text>
+                          {paymentKindBadge(p.kind)}
+                        </span>
+                        {p.note && (
+                          <Text type="supporting" color="secondary">
+                            {p.note}
+                          </Text>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
 
-            {/* Pagination */}
-            {paymentsRes && paymentsRes.meta.totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-text-secondary">
-                <span>
-                  Page {paymentsRes.meta.page} sur {paymentsRes.meta.totalPages} (
-                  {paymentsRes.meta.total} encaissements)
-                </span>
-                <div className="flex gap-1">
-                  <Button
-                    variant="secondary"
-                    disabled={paymentsRes.meta.page <= 1}
-                    onClick={() => setPaymentPage((p) => Math.max(1, p - 1))}
-                    className="p-1.5"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={paymentsRes.meta.page >= paymentsRes.meta.totalPages}
-                    onClick={() => setPaymentPage((p) => p + 1)}
-                    className="p-1.5"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-      )}
+              {paymentsRes && paymentsRes.meta.totalPages > 1 && (
+                <PagerFooter
+                  page={paymentsRes.meta.page}
+                  total={paymentsRes.meta.total}
+                  noun="encaissements"
+                  onChange={setPaymentPage}
+                />
+              )}
+            </Card>
+          </div>
+        )}
+      </div>
 
       {/* Declare / edit an expense — materials lines feed the stock */}
       <ExpenseFormModal
@@ -778,5 +719,118 @@ export default function FinancesPage() {
         loading={deleteExpenseMutation.isPending}
       />
     </DashboardShell>
+  );
+}
+
+
+
+/** Three filter fields on the left, the filtered total on the right. */
+function FilterBar({
+  children,
+  total,
+  totalLabel,
+  totalTone,
+}: {
+  children: ReactNode;
+  total: string;
+  totalLabel: string;
+  totalTone: "success" | "danger";
+}) {
+  return (
+    <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {children}
+      <div className="flex flex-col items-start sm:items-end">
+        <Text type="supporting" color="secondary">
+          {totalLabel}
+        </Text>
+        <span className={`text-xl font-semibold leading-tight tabular-nums ${totalTone === "success" ? "text-success" : "text-danger"}`}>
+          {total}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PagerFooter({
+  page,
+  total,
+  noun,
+  onChange,
+}: {
+  page: number;
+  total: number;
+  noun: string;
+  onChange: (page: number) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+      <Text type="supporting" color="secondary">
+        {total} {noun}
+      </Text>
+      <Pagination page={page} totalItems={total} pageSize={PAGE_SIZE} onChange={onChange} size="sm" />
+    </div>
+  );
+}
+
+function ExpenseDescription({ expense }: { expense: Expense }) {
+  return (
+    <div className="min-w-0">
+      {expense.note ||
+        (expense.lines.length === 0 && <span className="italic text-text-secondary">—</span>)}
+      {expense.lines.length > 0 && (
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-primary"
+            title="Matières ajoutées au stock"
+          >
+            <Boxes className="h-3.5 w-3.5" />
+            Stock
+          </span>
+          {expense.lines.map((l) => (
+            <span
+              key={l.id}
+              className="rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[11px] tabular-nums text-text-secondary"
+            >
+              {l.item_name} · {formatQty(l.quantity, l.item_unit)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExpenseActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  return (
+    <div className="flex justify-end gap-1">
+      <IconButton
+        label="Modifier la dépense"
+        tooltip="Modifier"
+        icon={<Icon icon={Pencil} size="sm" />}
+        variant="ghost"
+        size="sm"
+        onClick={onEdit}
+      />
+      <IconButton
+        label="Supprimer la dépense"
+        tooltip="Supprimer"
+        icon={<Icon icon={Trash2} size="sm" />}
+        variant="ghost"
+        size="sm"
+        onClick={onDelete}
+      />
+    </div>
+  );
+}
+
+function PaymentAmount({ payment }: { payment: PaymentReceiptRow }) {
+  const isRefund = payment.kind === "refund";
+  return (
+    <span
+      className={`shrink-0 whitespace-nowrap font-semibold tabular-nums ${isRefund ? "text-danger" : "text-success"}`}
+    >
+      {isRefund ? "-" : "+"}
+      {formatMillimes(payment.amount)}
+    </span>
   );
 }

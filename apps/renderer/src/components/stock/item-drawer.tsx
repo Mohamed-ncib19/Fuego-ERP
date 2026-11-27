@@ -27,7 +27,8 @@ export function ItemDrawer({
   onBuy,
   onMove,
   onEdit,
-  onToggleActive,
+  onRestore,
+  onDelete,
 }: {
   itemId: string | null;
   onClose: () => void;
@@ -35,7 +36,8 @@ export function ItemDrawer({
   onBuy: (item: StockItem) => void;
   onMove: (item: StockItem, type: ManualMovementType) => void;
   onEdit: (item: StockItem) => void;
-  onToggleActive: (item: StockItem) => void;
+  onRestore: (item: StockItem) => void;
+  onDelete: (item: StockItem) => void;
 }) {
   const itemQ = useStockItem(itemId);
   const historyQ = useStockMovements({ item_id: itemId ?? undefined, limit: 50 }, Boolean(itemId));
@@ -58,11 +60,12 @@ export function ItemDrawer({
               <MoreMenu
                 placement="up"
                 items={[
+                  ...(item.is_active ? [] : [{ label: "Réactiver", onClick: () => onRestore(item) }]),
                   {
-                    label: item.is_active ? "Archiver" : "Réactiver",
-                    danger: item.is_active,
-                    hint: item.is_active ? "Masqué des listes, historique conservé" : undefined,
-                    onClick: () => onToggleActive(item),
+                    label: "Supprimer",
+                    danger: true,
+                    hint: "Définitif : le nom pourra être réutilisé",
+                    onClick: () => onDelete(item),
                   },
                 ]}
               />

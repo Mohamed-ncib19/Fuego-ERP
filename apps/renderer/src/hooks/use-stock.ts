@@ -78,5 +78,10 @@ export function useStockMutations() {
     }) => stockApi.recordMovement(id, payload),
     onSuccess: invalidate,
   });
-  return { create, update, setActive, move };
+  const remove = useMutation({
+    mutationFn: ({ id, deleteExpenses }: { id: string; deleteExpenses: boolean }) =>
+      stockApi.deleteItem(id, deleteExpenses),
+    onSuccess: invalidate,
+  });
+  return { create, update, setActive, move, remove };
 }

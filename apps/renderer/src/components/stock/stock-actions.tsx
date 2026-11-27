@@ -1,17 +1,16 @@
 import { useState } from "react";
 import type { ManualMovementType, StockItem } from "@fuego/shared";
-import { ConfirmDialog } from "@/components/ui";
 import { ExpenseFormModal } from "@/components/expenses/expense-form-modal";
 import { useStockMutations } from "@/hooks/use-stock";
 import { useToast } from "@/hooks/use-toast";
-import { formatQty } from "@/lib/format";
 import { ItemDrawer } from "./item-drawer";
 import { MaterialDialog } from "./material-dialog";
 import { MovementDialog } from "./movement-dialog";
+import { DeleteMaterialDialog } from "./delete-material-dialog";
 
 /**
  * Every stock overlay in one place: item panel, purchase (a dépense with the
- * item pre-filled), movement, create/edit and archive confirmation. The page
+ * item pre-filled), movement, create/edit and permanent delete. The page
  * calls the openers and renders `overlays` once.
  */
 export function useStockActions({ isAdmin }: { isAdmin: boolean }) {
@@ -21,13 +20,10 @@ export function useStockActions({ isAdmin }: { isAdmin: boolean }) {
   const [moving, setMoving] = useState<{ item: StockItem; type: ManualMovementType } | null>(null);
   const [form, setForm] = useState<{ item: StockItem | null } | null>(null);
   const [buying, setBuying] = useState<StockItem | null>(null);
-  const [archiving, setArchiving] = useState<StockItem | null>(null);
+  const [deleting, setDeleting] = useState<StockItem | null>(null);
 
-  const toggleActive = (item: StockItem) => {
-    if (item.is_active) {
-      setArchiving(item);
-      return;
-    }
+  /** Only for items archived before delete existed: bring them back. */
+  const restore = (item: StockItem) => {
     setActive.mutate(
       { id: item.id, active: true },
       {
@@ -46,7 +42,8 @@ export function useStockActions({ isAdmin }: { isAdmin: boolean }) {
         onBuy={setBuying}
         onMove={(item, type) => setMoving({ item, type })}
         onEdit={(item) => setForm({ item })}
-        onToggleActive={toggleActive}
+        onRestore={restore}
+        onDelete={setDeleting}
       />
       <MovementDialog
         open={Boolean(moving)}
@@ -57,31 +54,10 @@ export function useStockActions({ isAdmin }: { isAdmin: boolean }) {
       />
       <MaterialDialog open={Boolean(form)} onClose={() => setForm(null)} item={form?.item} />
       <ExpenseFormModal open={Boolean(buying)} onClose={() => setBuying(null)} presetItem={buying} />
-      <ConfirmDialog
-        open={Boolean(archiving)}
-        onClose={() => setArchiving(null)}
-        onConfirm={() => {
-          if (!archiving) return;
-          setActive.mutate(
-            { id: archiving.id, active: false },
-            {
-              onSuccess: () => {
-                toast.success(`« ${archiving.name} » archivé`);
-                setArchiving(null);
-              },
-              onError: (e: Error) => toast.error(e.message),
-            },
-          );
-        }}
-        title={`Archiver « ${archiving?.name ?? ""} » ?`}
-        message={
-          archiving
-            ? `Il reste ${formatQty(archiving.quantity, archiving.unit)} en stock. L'article ne sera plus proposé dans les dépenses ni les mouvements ; son historique est conservé et vous pourrez le réactiver.`
-            : ""
-        }
-        confirmLabel="Archiver"
-        danger
-        loading={setActive.isPending}
+      <DeleteMaterialDialog
+        item={deleting}
+        onClose={() => setDeleting(null)}
+        onDeleted={() => setDrawerId((id) => (id === deleting?.id ? null : id))}
       />
     </>
   );
@@ -93,5 +69,7 @@ export function useStockActions({ isAdmin }: { isAdmin: boolean }) {
     openMove: (item: StockItem, type: ManualMovementType) => setMoving({ item, type }),
     openCreate: () => setForm({ item: null }),
     openEdit: (item: StockItem) => setForm({ item }),
+    openDelete: (item: StockItem) => setDeleting(item),
+    restore,
   };
 }

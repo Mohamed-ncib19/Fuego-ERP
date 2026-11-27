@@ -1,28 +1,27 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ClipboardList,
-  Wallet,
-  Plus,
-  ArrowRight,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Truck,
-  TrendingUp,
-  Receipt,
-  Eye,
-} from "lucide-react";
+import { ArrowRight, ClipboardList, Eye } from "lucide-react";
+import { Table, pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { Card } from "@astryxdesign/core/Card";
+import { Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import type { OrderStatus, OrderSummary } from "@fuego/shared";
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import { Card, Badge, Button, PageLoader } from "@/components/ui";
-import { formatMillimes, formatDate, roleLabel } from "@/lib/format";
+import { EmptyState, PageLoader, TableSkeleton, SummaryTile } from "@/components/ui";
+import { formatMillimes, formatDate } from "@/lib/format";
 import { useSettings } from "@/hooks/use-queries";
 import { financeApi } from "@/lib/api/finance.api";
 import { ordersApi } from "@/lib/api/orders.api";
 import { StatusBadge } from "@/components/orders/status-badge";
 import { TypeBadge } from "@/components/orders/type-badge";
+
+type OrderRow = OrderSummary & Record<string, unknown>;
+
+/** Workshop pipeline, in the order an order moves through it. */
+const PIPELINE: OrderStatus[] = ["pending", "confirmed", "in_progress", "ready", "delivered", "cancelled"];
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -50,163 +49,160 @@ export default function DashboardPage() {
       (stats.status_breakdown.ready || 0)
     : 0;
 
+  const columns = useMemo<TableColumn<OrderRow>[]>(
+    () => [
+      {
+        key: "ticket_no",
+        header: "N° Ticket",
+        width: pixel(120),
+        renderCell: (ord) => (
+          <Link to={`/commandes/${ord.id}`} className="whitespace-nowrap font-semibold text-primary hover:underline">
+            {ord.ticket_no}
+          </Link>
+        ),
+      },
+      {
+        key: "customer_name",
+        header: "Client",
+        width: proportional(2),
+        renderCell: (ord) =>
+          ord.customer_name ? (
+            <span className="font-medium">{ord.customer_name}</span>
+          ) : (
+            <span className="italic text-text-secondary">—</span>
+          ),
+      },
+      {
+        key: "order_type",
+        header: "Canal",
+        width: pixel(130),
+        renderCell: (ord) => <TypeBadge orderType={ord.order_type} />,
+      },
+      {
+        key: "status",
+        header: "Statut",
+        width: pixel(130),
+        renderCell: (ord) => <StatusBadge status={ord.status} />,
+      },
+      {
+        key: "due_date",
+        header: "Échéance",
+        width: pixel(120),
+        renderCell: (ord) => (
+          <Text type="supporting" color="secondary">
+            {ord.due_date ? formatDate(ord.due_date) : "—"}
+          </Text>
+        ),
+      },
+      {
+        key: "grand_total",
+        header: "Montant",
+        width: pixel(140),
+        align: "end",
+        renderCell: (ord) => (
+          <span className="whitespace-nowrap font-medium tabular-nums">{formatMillimes(ord.grand_total)}</span>
+        ),
+      },
+      {
+        key: "reste",
+        header: "Reste",
+        width: pixel(140),
+        align: "end",
+        renderCell: (ord) => <Reste reste={ord.reste} />,
+      },
+      {
+        key: "actions",
+        header: "",
+        width: pixel(64),
+        align: "end",
+        renderCell: (ord) => (
+          <IconButton
+            label={`Consulter la commande ${ord.ticket_no}`}
+            tooltip="Consulter"
+            icon={<Icon icon={Eye} size="sm" />}
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(`/commandes/${ord.id}`)}
+          />
+        ),
+      },
+    ],
+    [navigate],
+  );
+
   return (
     <DashboardShell
       title={`Bonjour ${firstName} 👋`}
       subtitle={settings?.business_name ? `${settings.business_name} — Vue d'ensemble de l'activité` : "Vue d'ensemble de l'activité"}
     >
-      <div className="space-y-6">
-
+      <div className="flex flex-col gap-5">
         {/* Live Operational KPI Cards */}
         {statsLoading ? (
           <PageLoader />
         ) : stats ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {/* Today Revenue */}
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Recettes aujourd'hui
-                </span>
-                <div className="rounded-full bg-success/10 p-2 text-success">
-                  <TrendingUp className="h-4 w-4" />
-                </div>
-              </div>
-              <div className="mt-2 text-2xl font-bold text-success">
-                +{formatMillimes(stats.today.revenue)}
-              </div>
-              <div className="mt-1 text-xs text-text-secondary">
-                {stats.today.orders_count} commande(s) créée(s) ce jour
-              </div>
-            </Card>
-
-            {/* Today Net Profit */}
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Bénéfice net aujourd'hui
-                </span>
-                <div
-                  className={`rounded-full p-2 ${
-                    stats.today.net_profit >= 0
-                      ? "bg-primary/10 text-primary"
-                      : "bg-danger/10 text-danger"
-                  }`}
-                >
-                  <Wallet className="h-4 w-4" />
-                </div>
-              </div>
-              <div
-                className={`mt-2 text-2xl font-bold ${
-                  stats.today.net_profit >= 0 ? "text-primary" : "text-danger"
-                }`}
-              >
-                {formatMillimes(stats.today.net_profit)}
-              </div>
-              <div className="mt-1 text-xs text-text-secondary">
-                Dépenses : -{formatMillimes(stats.today.expenses)}
-              </div>
-            </Card>
-
-            {/* Active Orders */}
-            <Card className="p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-                  Commandes en cours
-                </span>
-                <div className="rounded-full bg-primary/10 p-2 text-primary">
-                  <ClipboardList className="h-4 w-4" />
-                </div>
-              </div>
-              <div className="mt-2 text-2xl font-bold text-text-primary">
-                {activeOrdersCount}
-              </div>
-              <div className="mt-1 flex gap-2 text-xs text-text-secondary">
-                <span>{stats.status_breakdown.ready || 0} prête(s)</span>
-                <span>•</span>
-                <span>{stats.status_breakdown.in_progress || 0} en atelier</span>
-              </div>
-            </Card>
-
-            {/* Outstanding Balances */}
-            <Card className="p-4 border-warning/40 bg-warning/5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-warning-700 dark:text-warning">
-                  Reste à encaisser
-                </span>
-                <div className="rounded-full bg-warning/15 p-2 text-warning-700 dark:text-warning">
-                  <AlertCircle className="h-4 w-4" />
-                </div>
-              </div>
-              <div className="mt-2 text-2xl font-bold text-warning-800 dark:text-warning">
-                {formatMillimes(stats.overall.outstanding_balances)}
-              </div>
-              <div className="mt-1 text-xs text-text-secondary">
-                Créances actives sur commandes
-              </div>
-            </Card>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryTile
+              label="Recettes aujourd'hui"
+              value={`+${formatMillimes(stats.today.revenue)}`}
+              tone="success"
+              hint={`${stats.today.orders_count} commande(s) créée(s) ce jour`}
+            />
+            <SummaryTile
+              label="Bénéfice net aujourd'hui"
+              value={formatMillimes(stats.today.net_profit)}
+              tone={stats.today.net_profit >= 0 ? "primary" : "danger"}
+              hint={`Dépenses : -${formatMillimes(stats.today.expenses)}`}
+            />
+            <SummaryTile
+              label="Commandes en cours"
+              value={String(activeOrdersCount)}
+              hint={`${stats.status_breakdown.ready || 0} prête(s) · ${stats.status_breakdown.in_progress || 0} en atelier`}
+            />
+            <SummaryTile
+              label="Reste à encaisser"
+              value={formatMillimes(stats.overall.outstanding_balances)}
+              tone="warning"
+              hint="Créances actives sur commandes"
+            />
           </div>
         ) : null}
 
         {/* Workflow Pipeline Status Bar */}
         {stats && (
-          <Card className="p-4">
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          <Card padding={4}>
+            <Text as="h3" type="label" color="secondary" display="block">
               État d'avancement de l'atelier
-            </h3>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 text-center text-xs">
-              <div className="rounded-md border border-border bg-surface-2 p-2.5">
-                <div className="font-semibold text-text-secondary">Brouillons</div>
-                <div className="mt-1 text-lg font-bold text-text-primary">
-                  {stats.status_breakdown.pending || 0}
+            </Text>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+              {PIPELINE.map((status) => (
+                <div
+                  key={status}
+                  className="flex flex-col items-start gap-1.5 rounded-md border border-border bg-surface-2 p-3"
+                >
+                  <StatusBadge status={status} />
+                  <span className="text-xl font-semibold leading-tight tabular-nums">
+                    {stats.status_breakdown[status] || 0}
+                  </span>
                 </div>
-              </div>
-              <div className="rounded-md border border-info/30 bg-info/5 p-2.5">
-                <div className="font-semibold text-info">Confirmées</div>
-                <div className="mt-1 text-lg font-bold text-info">
-                  {stats.status_breakdown.confirmed || 0}
-                </div>
-              </div>
-              <div className="rounded-md border border-primary/30 bg-primary/5 p-2.5">
-                <div className="font-semibold text-primary">En atelier</div>
-                <div className="mt-1 text-lg font-bold text-primary">
-                  {stats.status_breakdown.in_progress || 0}
-                </div>
-              </div>
-              <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5">
-                <div className="font-semibold text-warning-700 dark:text-warning">Prêtes</div>
-                <div className="mt-1 text-lg font-bold text-warning-700 dark:text-warning">
-                  {stats.status_breakdown.ready || 0}
-                </div>
-              </div>
-              <div className="rounded-md border border-success/30 bg-success/5 p-2.5">
-                <div className="font-semibold text-success">Livrées</div>
-                <div className="mt-1 text-lg font-bold text-success">
-                  {stats.status_breakdown.delivered || 0}
-                </div>
-              </div>
-              <div className="rounded-md border border-border bg-surface-2 p-2.5">
-                <div className="font-semibold text-text-secondary">Annulées</div>
-                <div className="mt-1 text-lg font-bold text-text-secondary">
-                  {stats.status_breakdown.cancelled || 0}
-                </div>
-              </div>
+              ))}
             </div>
           </Card>
         )}
 
-        {/* Recent Orders Table */}
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-border p-4">
+        {/* Recent Orders */}
+        <Card padding={0}>
+          <div className="flex items-center justify-between gap-3 border-b border-border p-4">
             <div>
-              <h2 className="font-semibold text-text-primary">Commandes récentes</h2>
-              <p className="text-xs text-text-secondary">
+              <Text as="h2" type="large" weight="semibold" display="block">
+                Commandes récentes
+              </Text>
+              <Text type="supporting" color="secondary" display="block">
                 Dernières commandes enregistrées dans le système
-              </p>
+              </Text>
             </div>
             <Link
               to="/commandes"
-              className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+              className="flex shrink-0 items-center gap-1 text-xs font-semibold text-primary hover:underline"
             >
               <span>Voir tout</span>
               <ArrowRight className="h-3.5 w-3.5" />
@@ -214,82 +210,65 @@ export default function DashboardPage() {
           </div>
 
           {ordersLoading ? (
-            <PageLoader />
+            <TableSkeleton rows={6} cols={6} />
           ) : !recentOrders || recentOrders.data.length === 0 ? (
-            <div className="p-8 text-center text-text-secondary">
-              Aucune commande récente pour le moment.
-            </div>
+            <EmptyState
+              compact
+              icon={<ClipboardList className="h-8 w-8" />}
+              title="Aucune commande récente pour le moment."
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
-                  <tr>
-                    <th className="px-4 py-3">N° Ticket</th>
-                    <th className="px-4 py-3">Client</th>
-                    <th className="px-4 py-3">Canal</th>
-                    <th className="px-4 py-3">Statut</th>
-                    <th className="px-4 py-3">Échéance</th>
-                    <th className="px-4 py-3 text-right">Montant</th>
-                    <th className="px-4 py-3 text-right">Reste</th>
-                    <th className="px-4 py-3 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {recentOrders.data.map((ord) => (
-                    <tr
-                      key={ord.id}
-                      className="hover:bg-surface-2/50 transition-colors"
-                    >
-                      <td className="whitespace-nowrap px-4 py-3 font-semibold">
-                        <Link
-                          to={`/commandes/${ord.id}`}
-                          className="text-primary hover:underline"
-                        >
-                          {ord.ticket_no}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3 font-medium text-text-primary">
-                        {ord.customer_name || <span className="italic text-text-secondary">—</span>}
-                      </td>
-                      <td className="px-4 py-3">
-                        <TypeBadge orderType={ord.order_type} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <StatusBadge status={ord.status} />
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-xs text-text-secondary">
-                        {ord.due_date ? formatDate(ord.due_date) : "—"}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-text-primary">
-                        {formatMillimes(ord.grand_total)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold">
-                        {ord.reste > 0 ? (
-                          <span className="text-warning-700 dark:text-warning">
-                            {formatMillimes(ord.reste)}
-                          </span>
-                        ) : (
-                          <span className="text-success">Réglé</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-center">
-                        <Button
-                          variant="ghost"
-                          className="h-8 w-8 p-0"
-                          onClick={() => navigate(`/commandes/${ord.id}`)}
-                          title="Consulter"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Table from md; a tappable list on phones. */}
+              <div className="hidden md:block">
+                <Table<OrderRow>
+                  data={recentOrders.data as OrderRow[]}
+                  columns={columns}
+                  idKey="id"
+                  hasHover
+                  verticalAlign="middle"
+                />
+              </div>
+              <ul className="divide-y divide-border md:hidden">
+                {recentOrders.data.map((ord) => (
+                  <li key={ord.id}>
+                    <Link to={`/commandes/${ord.id}`} className="flex flex-col gap-2 px-4 py-3">
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate">
+                          <span className="font-semibold text-primary">{ord.ticket_no}</span>
+                          {ord.customer_name && <span className="font-medium"> · {ord.customer_name}</span>}
+                        </span>
+                        <span className="shrink-0 font-semibold tabular-nums">
+                          {formatMillimes(ord.grand_total)}
+                        </span>
+                      </span>
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="flex items-center gap-2">
+                          <StatusBadge status={ord.status} />
+                          <TypeBadge orderType={ord.order_type} />
+                        </span>
+                        <span className="text-sm">
+                          <Reste reste={ord.reste} />
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </Card>
       </div>
     </DashboardShell>
   );
 }
+
+function Reste({ reste }: { reste: number }) {
+  return reste > 0 ? (
+    <span className="whitespace-nowrap font-semibold tabular-nums text-warning">{formatMillimes(reste)}</span>
+  ) : (
+    <span className="font-semibold text-success">Réglé</span>
+  );
+}
+
+

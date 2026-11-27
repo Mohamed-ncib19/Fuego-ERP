@@ -1,19 +1,44 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Store, Ticket, Database, Download, Upload, ShieldCheck, ArrowRight } from "lucide-react";
+import { Store, Database, Download, Upload, ShieldCheck, ArrowRight } from "lucide-react";
+import { Card } from "@astryxdesign/core/Card";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Divider } from "@astryxdesign/core/Divider";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { settingsApi } from "@/lib/api/settings.api";
 import { useSettings } from "@/hooks/use-queries";
 import { useToast } from "@/hooks/use-toast";
-import { Button, Card, Input, Label, ConfirmDialog } from "@/components/ui";
+import { Button, ConfirmDialog, Skeleton } from "@/components/ui";
+
+/** Printed when the footer is left empty (see order-ticket.tsx). */
+const DEFAULT_FOOTER =
+  "Merci pour votre confiance ! Pour toute réclamation, veuillez présenter ce ticket.";
+
+type Errors = Partial<Record<"businessName" | "ticketFooter", string>>;
+
+function SectionTitle({ icon, children }: { icon: typeof Store; children: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-primary">
+        <Icon icon={icon} size="md" />
+      </span>
+      <Heading level={2}>{children}</Heading>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { data: settings, isLoading } = useSettings();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [businessName, setBusinessName] = useState("");
   const [ticketFooter, setTicketFooter] = useState("");
+  const [errors, setErrors] = useState<Errors>({});
 
   // Restore state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -28,6 +53,11 @@ export default function SettingsPage() {
     }
   }, [settings]);
 
+  const dirty =
+    !!settings &&
+    (businessName !== (settings.business_name ?? "") ||
+      ticketFooter !== (settings.ticket_footer ?? ""));
+
   const save = useMutation({
     mutationFn: () =>
       settingsApi.update({
@@ -40,6 +70,17 @@ export default function SettingsPage() {
     },
     onError: (err) => toast.error((err as Error).message),
   });
+
+  // Same limits as the server (settings.dto.ts), shown on the field.
+  const submit = () => {
+    const e: Errors = {};
+    if (businessName.trim().length < 2) e.businessName = "Nom de commerce requis (2 caractères minimum)";
+    else if (businessName.length > 80) e.businessName = "80 caractères maximum";
+    if (ticketFooter.length > 200) e.ticketFooter = "200 caractères maximum";
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    save.mutate();
+  };
 
   const handleDownloadBackup = async () => {
     try {
@@ -97,114 +138,133 @@ export default function SettingsPage() {
 
   return (
     <DashboardShell title="Paramètres" subtitle="Identité du commerce, tickets et maintenance">
-      <div className="max-w-xl space-y-6">
-        {/* Business Settings */}
-        <Card className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Store className="h-5 w-5 text-primary" />
-            <h2 className="text-h3 font-semibold text-text-primary">Commerce</h2>
-          </div>
-          {isLoading ? null : (
-            <div className="space-y-4">
-              <div>
-                <Label>Nom du commerce</Label>
-                <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} />
-                <p className="mt-1 text-xs text-text-secondary">
-                  Affiché sur l'écran de connexion et sur les tickets.
-                </p>
+      <div className="flex max-w-xl flex-col gap-6">
+        {/* Business identity + ticket footer: one form, one save button. */}
+        <Card>
+          <form
+            className="flex flex-col gap-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
+            }}
+          >
+            <SectionTitle icon={Store}>Commerce et tickets</SectionTitle>
+            {isLoading ? (
+              <div className="flex flex-col gap-4" aria-busy="true">
+                <Skeleton height={60} />
+                <Skeleton height={60} />
+                <Skeleton height={60} />
               </div>
-              <div>
-                <Label>Devise</Label>
-                <Input value={settings?.currency ?? "TND"} disabled />
-                <p className="mt-1 text-xs text-text-secondary">Fixée au dinar tunisien (DT).</p>
-              </div>
+            ) : (
+              <>
+                <TextInput
+                  label="Nom du commerce"
+                  description="Affiché sur l'écran de connexion et sur les tickets."
+                  value={businessName}
+                  onChange={(v) => {
+                    setBusinessName(v);
+                    setErrors((x) => ({ ...x, businessName: undefined }));
+                  }}
+                  isRequired
+                  status={
+                    errors.businessName ? { type: "error", message: errors.businessName } : undefined
+                  }
+                  width="100%"
+                />
+                <TextInput
+                  label="Devise"
+                  description="Fixée au dinar tunisien (DT)."
+                  value={settings?.currency ?? "TND"}
+                  isReadOnly
+                  width="100%"
+                />
+                <TextInput
+                  label="Pied de ticket"
+                  isOptional
+                  description={`Imprimé en bas de chaque ticket de commande. Laissé vide : « ${DEFAULT_FOOTER} »`}
+                  value={ticketFooter}
+                  onChange={(v) => {
+                    setTicketFooter(v);
+                    setErrors((x) => ({ ...x, ticketFooter: undefined }));
+                  }}
+                  placeholder="Ex : Merci de votre confiance — 12 rue de la République, Tunis"
+                  hasClear
+                  status={
+                    errors.ticketFooter ? { type: "error", message: errors.ticketFooter } : undefined
+                  }
+                  width="100%"
+                />
+              </>
+            )}
+            <Divider />
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              {dirty && (
+                <Text type="supporting" color="secondary">
+                  Modifications non enregistrées
+                </Text>
+              )}
+              <Button type="submit" loading={save.isPending} disabled={!dirty}>
+                Enregistrer les modifications
+              </Button>
             </div>
-          )}
+          </form>
         </Card>
-
-        {/* Tickets Settings */}
-        <Card className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <Ticket className="h-5 w-5 text-primary" />
-            <h2 className="text-h3 font-semibold text-text-primary">Tickets</h2>
-          </div>
-          <Label>Pied de ticket (optionnel)</Label>
-          <Input
-            value={ticketFooter}
-            onChange={(e) => setTicketFooter(e.target.value)}
-            placeholder="Ex : Merci de votre confiance — 12 rue de la République, Tunis"
-          />
-          <p className="mt-1 text-xs text-text-secondary">
-            Imprimé en bas de chaque ticket de commande imprimable.
-          </p>
-        </Card>
-
-        <Button loading={save.isPending} onClick={() => save.mutate()}>
-          Enregistrer les modifications
-        </Button>
 
         {/* Database Backup & Restore */}
-        <Card className="p-5 border-primary/20">
-          <div className="mb-3 flex items-center gap-2">
-            <Database className="h-5 w-5 text-primary" />
-            <h2 className="text-h3 font-semibold text-text-primary">
-              Base de données & Sauvegardes
-            </h2>
-          </div>
-          <p className="mb-4 text-xs text-text-secondary">
-            Effectuez des copies de sécurité régulières pour protéger vos commandes, clients et
-            données comptables.
-          </p>
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              variant="secondary"
-              loading={isDownloadingBackup}
-              onClick={handleDownloadBackup}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Télécharger une sauvegarde (.db)
-            </Button>
-
-            <Button
-              variant="secondary"
-              onClick={() => fileInputRef.current?.click()}
-              className="gap-2"
-            >
-              <Upload className="h-4 w-4" />
-              Restaurer une sauvegarde
-            </Button>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept=".db,.sqlite"
-              className="hidden"
-              onChange={handleFileSelected}
-            />
+        <Card>
+          <div className="flex flex-col gap-4">
+            <SectionTitle icon={Database}>Base de données et sauvegardes</SectionTitle>
+            <Text color="secondary" display="block">
+              Effectuez des copies de sécurité régulières pour protéger vos commandes, clients et
+              données comptables.
+            </Text>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="secondary"
+                loading={isDownloadingBackup}
+                onClick={handleDownloadBackup}
+                icon={<Download className="h-4 w-4" />}
+              >
+                Télécharger une sauvegarde (.db)
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => fileInputRef.current?.click()}
+                icon={<Upload className="h-4 w-4" />}
+              >
+                Restaurer une sauvegarde
+              </Button>
+              {/* Native picker, opened by the button above. */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".db,.sqlite"
+                className="hidden"
+                onChange={handleFileSelected}
+              />
+            </div>
           </div>
         </Card>
 
         {/* Audit Trail Link */}
-        <Card className="p-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <div className="rounded-lg bg-surface-2 p-2 text-primary">
-                <ShieldCheck className="h-5 w-5" />
+                <Icon icon={ShieldCheck} size="md" />
               </div>
-              <div>
-                <h3 className="font-semibold text-text-primary">Journal d'audit</h3>
-                <p className="text-xs text-text-secondary">
+              <div className="min-w-0">
+                <Heading level={3}>Journal d'audit</Heading>
+                <Text type="supporting" color="secondary" display="block">
                   Consulter la traçabilité des opérations, modifications et suppressions.
-                </p>
+                </Text>
               </div>
             </div>
-            <Link to="/audit">
-              <Button variant="secondary" className="gap-1.5 text-xs">
-                <span>Ouvrir</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
+            <Button variant="secondary" onClick={() => navigate("/audit")}>
+              Ouvrir
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </Card>
       </div>

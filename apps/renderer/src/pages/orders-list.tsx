@@ -1,18 +1,27 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ClipboardList, Search, LayoutGrid, Table as TableIcon, AlertCircle, Eye } from "lucide-react";
 import {
-  Plus,
-  Search,
-  LayoutGrid,
-  Table as TableIcon,
-  Calendar,
-  AlertCircle,
-  Eye,
-  Filter,
-} from "lucide-react";
+  Table,
+  pixel,
+  proportional,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn,
+  type TablePlugin,
+} from "@astryxdesign/core/Table";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Pagination } from "@astryxdesign/core/Pagination";
+import { Card } from "@astryxdesign/core/Card";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Text } from "@astryxdesign/core/Text";
+import { Icon } from "@astryxdesign/core/Icon";
+import { Button as AxButton } from "@astryxdesign/core/Button";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import { Button, Input, Select, Card, Badge, PageLoader } from "@/components/ui";
+import { Button, EmptyState, ErrorState, PageLoader, TableSkeleton } from "@/components/ui";
 import { StatusBadge } from "@/components/orders/status-badge";
 import { TypeBadge } from "@/components/orders/type-badge";
 import { OrderCard } from "@/components/orders/order-card";
@@ -22,6 +31,32 @@ import { useToast } from "@/hooks/use-toast";
 import { formatPhone, type OrderStatus, type OrderSummary } from "@fuego/shared";
 
 type QuickView = "all" | "today" | "overdue" | "to_deliver";
+type Row = OrderSummary & Record<string, unknown>;
+
+const STATUS_OPTIONS = [
+  { value: "pending", label: "En attente (Brouillon)" },
+  { value: "confirmed", label: "Confirmée" },
+  { value: "in_progress", label: "En cours" },
+  { value: "ready", label: "Prête" },
+  { value: "delivered", label: "Livrée" },
+  { value: "cancelled", label: "Annulée" },
+];
+
+const TYPE_OPTIONS = [
+  { value: "local", label: "Local (Comptoir)" },
+  { value: "online", label: "En ligne (Livraison)" },
+];
+
+/** Money left to pay: warning while due, info when overpaid, success when settled. */
+function resteClass(reste: number): string {
+  return reste > 0 ? "text-warning" : reste < 0 ? "text-info" : "text-success";
+}
+
+const isIncomplete = (o: OrderSummary) => o.items_count === 0 && o.status === "pending";
+
+function IncompleteBadge() {
+  return <Badge variant="error" label="Incomplète" icon={<Icon icon={AlertCircle} size="sm" />} />;
+}
 
 export default function OrdersListPage() {
   const navigate = useNavigate();
@@ -42,6 +77,15 @@ export default function OrdersListPage() {
   const handleViewChange = (mode: "table" | "kanban") => {
     setViewMode(mode);
     localStorage.setItem("fuego_orders_view", mode);
+  };
+
+  // A quick view replaces the filters it overrides, so the selectors never
+  // show a value the list is not using.
+  const handleQuickView = (v: QuickView) => {
+    setQuickView(v);
+    if (v !== "all") setStatus("");
+    if (v === "to_deliver") setOrderType("");
+    setPage(1);
   };
 
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
@@ -69,10 +113,11 @@ export default function OrdersListPage() {
     return p;
   }, [page, limit, search, orderType, quickView, todayStr, status]);
 
-  const { data, isLoading } = useQuery({
+  const listQ = useQuery({
     queryKey: ["orders", queryParams],
     queryFn: () => ordersApi.list(queryParams),
   });
+  const { data } = listQ;
 
   // Kanban columns fetch all active orders
   const { data: kanbanData, isLoading: isKanbanLoading } = useQuery({
@@ -130,267 +175,341 @@ export default function OrdersListPage() {
     ];
   }, [kanbanData]);
 
+  // Sorting reorders the page on screen; the server still pages newest first.
+  const rows = useMemo(() => (data?.data ?? []) as Row[], [data]);
+  const { sortedData, sortConfig } = useTableSortableState<Row>({ data: rows });
+  const sortPlugin = useTableSortable<Row>(sortConfig);
+
+  // The whole row opens the order (the ticket and the eye button do too, for keyboards).
+  const rowClickPlugin = useMemo<TablePlugin<Row>>(
+    () => ({
+      rowModel: "flat",
+      transformBodyRow: (props, item) => ({
+        ...props,
+        htmlProps: {
+          ...props.htmlProps,
+          style: { ...props.htmlProps.style, cursor: "pointer" },
+          onClick: (e) => {
+            if ((e.target as HTMLElement).closest("button, a")) return;
+            navigate(`/commandes/${item.id}`);
+          },
+        },
+      }),
+    }),
+    [navigate],
+  );
+
+  const columns = useMemo<TableColumn<Row>[]>(
+    () => [
+      {
+        key: "ticket_no",
+        header: "Ticket",
+        width: pixel(130),
+        sortable: true,
+        renderCell: (o) => (
+          <button
+            type="button"
+            onClick={() => navigate(`/commandes/${o.id}`)}
+            className="whitespace-nowrap font-mono font-medium text-primary hover:underline"
+          >
+            {o.ticket_no}
+          </button>
+        ),
+      },
+      {
+        key: "created_at",
+        header: "Date",
+        width: pixel(120),
+        sortable: true,
+        renderCell: (o) => (
+          <Text type="supporting" color="secondary" hasTabularNumbers>
+            {formatDate(o.created_at)}
+          </Text>
+        ),
+      },
+      {
+        key: "customer_name",
+        header: "Client",
+        width: proportional(2),
+        sortable: true,
+        renderCell: (o) => (
+          <div className="flex min-w-0 flex-col items-start gap-0.5">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-text-primary">
+                {o.customer_name || "Sans nom (Brouillon)"}
+              </span>
+              {isIncomplete(o) && <IncompleteBadge />}
+            </span>
+            {o.customer_phone && (
+              <Text type="supporting" color="secondary">
+                {formatPhone(o.customer_phone)}
+              </Text>
+            )}
+          </div>
+        ),
+      },
+      {
+        key: "order_type",
+        header: "Type",
+        width: pixel(110),
+        renderCell: (o) => <TypeBadge orderType={o.order_type} />,
+      },
+      {
+        key: "items_count",
+        header: "Articles",
+        width: pixel(95),
+        align: "end",
+        sortable: true,
+        renderCell: (o) => (
+          <Text type="supporting" color="secondary" hasTabularNumbers>
+            {o.items_count} art.
+          </Text>
+        ),
+      },
+      {
+        key: "grand_total",
+        header: "Total",
+        width: pixel(130),
+        align: "end",
+        sortable: true,
+        renderCell: (o) => (
+          <span className="font-medium tabular-nums text-text-primary">{formatMillimes(o.grand_total)}</span>
+        ),
+      },
+      {
+        key: "reste",
+        header: "Reste",
+        width: pixel(130),
+        align: "end",
+        sortable: true,
+        renderCell: (o) => (
+          <span className={`font-medium tabular-nums ${resteClass(o.reste)}`}>{formatMillimes(o.reste)}</span>
+        ),
+      },
+      {
+        key: "status",
+        header: "Statut",
+        width: pixel(120),
+        renderCell: (o) => <StatusBadge status={o.status} />,
+      },
+      {
+        key: "actions",
+        header: "",
+        width: pixel(56),
+        align: "end",
+        renderCell: (o) => (
+          <AxButton
+            label={`Ouvrir la commande ${o.ticket_no}`}
+            isIconOnly
+            size="sm"
+            variant="ghost"
+            icon={<Icon icon={Eye} size="sm" />}
+            onClick={() => navigate(`/commandes/${o.id}`)}
+          />
+        ),
+      },
+    ],
+    [navigate],
+  );
+
+  const total = data?.meta?.total ?? 0;
+  const filtered = search.trim() !== "" || status !== "" || orderType !== "" || quickView !== "all";
+  const clearFilters = () => {
+    setSearch("");
+    setStatus("");
+    setOrderType("");
+    setQuickView("all");
+    setPage(1);
+  };
+
   return (
     <DashboardShell
       title="Commandes"
       subtitle="Gestion du flux de production, paiements et livraison"
+      actions={
+        <SegmentedControl
+          label="Affichage des commandes"
+          value={viewMode}
+          onChange={(v) => handleViewChange(v as "table" | "kanban")}
+        >
+          <SegmentedControlItem value="table" label="Vue tableau" isLabelHidden icon={<Icon icon={TableIcon} size="sm" />} />
+          <SegmentedControlItem value="kanban" label="Vue kanban" isLabelHidden icon={<Icon icon={LayoutGrid} size="sm" />} />
+        </SegmentedControl>
+      }
     >
-      <div className="space-y-4">
-        {/* Top Controls Bar */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => { setQuickView("all"); setPage(1); }}
-              className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "all" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
-              }`}
-            >
-              Toutes
-            </button>
-            <button
-              onClick={() => { setQuickView("today"); setPage(1); }}
-              className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "today" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
-              }`}
-            >
-              Aujourd'hui
-            </button>
-            <button
-              onClick={() => { setQuickView("overdue"); setPage(1); }}
-              className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "overdue" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
-              }`}
-            >
-              En retard
-            </button>
-            <button
-              onClick={() => { setQuickView("to_deliver"); setPage(1); }}
-              className={`rounded-btn px-3 py-1.5 text-xs font-medium transition-colors ${
-                quickView === "to_deliver" ? "bg-primary text-neutral-950 font-semibold" : "bg-surface border border-border text-text-secondary hover:bg-surface-2"
-              }`}
-            >
-              À livrer (En ligne)
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-btn border border-border bg-surface p-0.5">
-              <button
-                onClick={() => handleViewChange("table")}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  viewMode === "table" ? "bg-surface-2 text-primary font-semibold" : "text-text-secondary hover:text-text-primary"
-                }`}
-                title="Vue Tableau"
-              >
-                <TableIcon className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => handleViewChange("kanban")}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  viewMode === "kanban" ? "bg-surface-2 text-primary font-semibold" : "text-text-secondary hover:text-text-primary"
-                }`}
-                title="Vue Kanban"
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Filter bar (in table view) */}
-        {viewMode === "table" && (
-          <Card className="p-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-text-secondary" />
-                <Input
-                  className="pl-9"
-                  placeholder="Rechercher ticket, client, tel..."
-                  value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                />
-              </div>
-
-              <div>
-                <Select
-                  value={status}
-                  onChange={(e) => { setStatus(e.target.value); setQuickView("all"); setPage(1); }}
-                >
-                  <option value="">Tous les statuts</option>
-                  <option value="pending">En attente (Brouillon)</option>
-                  <option value="confirmed">Confirmée</option>
-                  <option value="in_progress">En cours</option>
-                  <option value="ready">Prête</option>
-                  <option value="delivered">Livrée</option>
-                  <option value="cancelled">Annulée</option>
-                </Select>
-              </div>
-
-              <div>
-                <Select
-                  value={orderType}
-                  onChange={(e) => { setOrderType(e.target.value); setPage(1); }}
-                >
-                  <option value="">Tous les types</option>
-                  <option value="local">Local (Comptoir)</option>
-                  <option value="online">En ligne (Livraison)</option>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-end text-xs text-text-secondary">
-                <span>{data?.meta?.total ?? 0} commande(s) trouvée(s)</span>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {/* Content View: Table or Kanban */}
+      <div className="flex flex-col gap-4">
         {viewMode === "table" ? (
-          isLoading ? (
-            <PageLoader />
-          ) : (
-            <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-border bg-surface-2/50 text-xs uppercase text-text-secondary">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">Ticket</th>
-                      <th className="px-4 py-3 font-semibold">Date</th>
-                      <th className="px-4 py-3 font-semibold">Client</th>
-                      <th className="px-4 py-3 font-semibold">Type</th>
-                      <th className="px-4 py-3 font-semibold">Articles</th>
-                      <th className="px-4 py-3 font-semibold">Total</th>
-                      <th className="px-4 py-3 font-semibold">Reste</th>
-                      <th className="px-4 py-3 font-semibold">Statut</th>
-                      <th className="px-4 py-3 text-right font-semibold">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/60">
-                    {data?.data.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="py-12 text-center text-text-secondary">
-                          Aucune commande trouvée.
-                        </td>
-                      </tr>
-                    ) : (
-                      data?.data.map((order) => {
-                        const isIncomplete = order.items_count === 0 && order.status === "pending";
-                        return (
-                          <tr
-                            key={order.id}
-                            onClick={() => navigate(`/commandes/${order.id}`)}
-                            className="cursor-pointer transition-colors hover:bg-surface-2"
-                          >
-                            <td className="whitespace-nowrap px-4 py-3 font-mono font-medium text-primary">
-                              {order.ticket_no}
-                            </td>
-                            <td className="px-4 py-3 text-xs text-text-secondary">
-                              {formatDate(order.created_at)}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-text-primary">
-                                  {order.customer_name || "Sans nom (Brouillon)"}
-                                </span>
-                                {isIncomplete && (
-                                  <Badge tone="danger">
-                                    <span className="flex items-center gap-1">
-                                      <AlertCircle className="h-3 w-3" />
-                                      Incomplète
-                                    </span>
-                                  </Badge>
-                                )}
-                              </div>
-                              {order.customer_phone && (
-                                <p className="text-xs text-text-secondary">{formatPhone(order.customer_phone)}</p>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <TypeBadge orderType={order.order_type} />
-                            </td>
-                            <td className="px-4 py-3 text-xs text-text-secondary">
-                              {order.items_count} art.
-                            </td>
-                            <td className="px-4 py-3 font-medium text-text-primary">
-                              {formatMillimes(order.grand_total)}
-                            </td>
-                            <td className="px-4 py-3 font-medium">
-                              <span
-                                className={
-                                  order.reste > 0
-                                    ? "text-warning"
-                                    : order.reste < 0
-                                    ? "text-info"
-                                    : "text-success"
-                                }
-                              >
-                                {formatMillimes(order.reste)}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <StatusBadge status={order.status} />
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <Button
-                                variant="ghost"
-                                className="h-7 w-7 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigate(`/commandes/${order.id}`);
-                                }}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+          <>
+            {/* Quick views, then the fine filters. The kanban shows every active order, so it has none. */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="max-w-full overflow-x-auto [&>*]:w-max">
+                <SegmentedControl
+                  label="Vues rapides"
+                  value={quickView}
+                  onChange={(v) => handleQuickView(v as QuickView)}
+                >
+                  <SegmentedControlItem value="all" label="Toutes" />
+                  <SegmentedControlItem value="today" label="Aujourd'hui" />
+                  <SegmentedControlItem value="overdue" label="En retard" />
+                  <SegmentedControlItem value="to_deliver" label="À livrer" />
+                </SegmentedControl>
               </div>
-
-              {/* Pagination */}
-              {data?.meta && data.meta.totalPages > 1 && (
-                <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs">
-                  <span className="text-text-secondary">
-                    Page {data.meta.page} sur {data.meta.totalPages} ({data.meta.total} résultats)
-                  </span>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="secondary"
-                      className="px-2.5 py-1 text-xs"
-                      disabled={page <= 1}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    >
-                      Précédent
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      className="px-2.5 py-1 text-xs"
-                      disabled={page >= data.meta.totalPages}
-                      onClick={() => setPage((p) => p + 1)}
-                    >
-                      Suivant
-                    </Button>
-                  </div>
+              <div className="ml-auto flex w-full flex-wrap gap-3 lg:w-auto">
+                <div className="min-w-0 flex-1 sm:w-[200px] sm:flex-none">
+                  <Selector
+                    label="Statut"
+                    isLabelHidden
+                    placeholder="Tous les statuts"
+                    options={STATUS_OPTIONS}
+                    value={status || null}
+                    onChange={(v) => {
+                      setStatus(v ?? "");
+                      setQuickView("all");
+                      setPage(1);
+                    }}
+                    hasClear
+                    width="100%"
+                  />
                 </div>
+                <div className="min-w-0 flex-1 sm:w-[190px] sm:flex-none">
+                  <Selector
+                    label="Type de commande"
+                    isLabelHidden
+                    placeholder="Tous les types"
+                    options={TYPE_OPTIONS}
+                    value={orderType || null}
+                    onChange={(v) => {
+                      setOrderType(v ?? "");
+                      if (v && quickView === "to_deliver") setQuickView("all");
+                      setPage(1);
+                    }}
+                    hasClear
+                    width="100%"
+                  />
+                </div>
+                <div className="w-full sm:w-[280px]">
+                  <TextInput
+                    label="Rechercher une commande"
+                    isLabelHidden
+                    type="search"
+                    placeholder="Ticket, client, téléphone…"
+                    value={search}
+                    onChange={(v) => {
+                      setSearch(v);
+                      setPage(1);
+                    }}
+                    startIcon={<Icon icon={Search} size="sm" />}
+                    hasClear
+                    width="100%"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Text type="supporting" color="secondary">
+              {data ? `${total} commande${total > 1 ? "s" : ""} trouvée${total > 1 ? "s" : ""}` : "Chargement…"}
+            </Text>
+
+            <Card padding={0}>
+              {listQ.isLoading ? (
+                <TableSkeleton rows={6} cols={6} />
+              ) : listQ.isError ? (
+                <ErrorState message={(listQ.error as Error).message} onRetry={() => void listQ.refetch()} />
+              ) : rows.length === 0 ? (
+                <EmptyState
+                  icon={<ClipboardList className="h-8 w-8" />}
+                  title={filtered ? "Aucune commande ne correspond" : "Aucune commande trouvée"}
+                  description={filtered ? undefined : "Les commandes créées apparaîtront ici."}
+                  action={
+                    filtered ? (
+                      <Button variant="secondary" onClick={clearFilters}>
+                        Effacer les filtres
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <>
+                  {/* Table from md; a tappable list on phones. */}
+                  <div className="hidden md:block">
+                    <Table<Row>
+                      data={sortedData}
+                      columns={columns}
+                      idKey="id"
+                      hasHover
+                      verticalAlign="middle"
+                      plugins={{ sort: sortPlugin, rowClick: rowClickPlugin }}
+                    />
+                  </div>
+                  <ul className="divide-y divide-border md:hidden">
+                    {rows.map((o) => (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/commandes/${o.id}`)}
+                          className="flex w-full flex-col gap-1.5 px-4 py-3 text-left"
+                        >
+                          <span className="flex items-center justify-between gap-3">
+                            <span className="font-mono text-sm font-medium text-primary">{o.ticket_no}</span>
+                            <StatusBadge status={o.status} />
+                          </span>
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="min-w-0 truncate font-medium">
+                              {o.customer_name || "Sans nom (Brouillon)"}
+                            </span>
+                            {isIncomplete(o) && <IncompleteBadge />}
+                            <TypeBadge orderType={o.order_type} />
+                          </span>
+                          <span className="flex items-center justify-between gap-3 text-xs">
+                            <span className="text-text-secondary">
+                              {formatDate(o.created_at)} · {o.items_count} art.
+                            </span>
+                            <span className="tabular-nums">
+                              <span className="font-medium">{formatMillimes(o.grand_total)}</span>
+                              {o.reste !== 0 && (
+                                <span className={resteClass(o.reste)}> · reste {formatMillimes(o.reste)}</span>
+                              )}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {data?.meta && data.meta.totalPages > 1 && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+                      <Text type="supporting" color="secondary">
+                        Page {data.meta.page} sur {data.meta.totalPages} ({data.meta.total} résultats)
+                      </Text>
+                      <Pagination
+                        page={page}
+                        onChange={setPage}
+                        totalPages={data.meta.totalPages}
+                        totalItems={data.meta.total}
+                        pageSize={limit}
+                        size="sm"
+                        label="Pages des commandes"
+                      />
+                    </div>
+                  )}
+                </>
               )}
             </Card>
-          )
+          </>
         ) : isKanbanLoading ? (
           <PageLoader />
         ) : (
           /* Kanban Board */
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {kanbanColumns.map((col) => (
-              <div key={col.status} className="flex flex-col rounded-card border border-border bg-surface-2/40 p-3">
+              <section
+                key={col.status}
+                aria-label={col.title}
+                className="flex flex-col rounded-card border border-border bg-surface-2/40 p-3"
+              >
                 <div className="mb-3 flex items-center justify-between px-1">
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={col.status} />
-                    <span className="font-semibold text-text-primary">{col.title}</span>
-                  </div>
-                  <Badge tone="neutral">{col.count}</Badge>
+                  <StatusBadge status={col.status} />
+                  <Badge variant="neutral" label={String(col.count)} />
                 </div>
 
                 <div className="flex flex-1 flex-col gap-2.5 overflow-y-auto">
@@ -409,7 +528,7 @@ export default function OrdersListPage() {
                     ))
                   )}
                 </div>
-              </div>
+              </section>
             ))}
           </div>
         )}

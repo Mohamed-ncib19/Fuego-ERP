@@ -1,132 +1,144 @@
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Info } from "lucide-react";
+import { KeyRound } from "lucide-react";
+import { Card } from "@astryxdesign/core/Card";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Icon } from "@astryxdesign/core/Icon";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
+import { PasswordField } from "@/components/password-field";
 import { authApi } from "@/lib/api/auth.api";
 import { useAuthStore } from "@/hooks/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
-import { Button, Card, Input, Label, FieldError, Badge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { roleLabel } from "@/lib/format";
+
+type Errors = Partial<Record<"current" | "next" | "confirm" | "form", string>>;
 
 export default function ProfilePage() {
   const { user, clear } = useAuthStore();
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
 
-  const { register, handleSubmit, formState } = useForm<{
-    current_password: string;
-    new_password: string;
-    confirm: string;
-  }>();
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [errors, setErrors] = useState<Errors>({});
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    // Changing the password revokes every session — including this one — so
-    // the user must log in again afterwards (explain it up front).
-  }, []);
+  const validate = (): Errors => {
+    const e: Errors = {};
+    if (!current) e.current = "Mot de passe actuel requis";
+    if (!next) e.next = "Nouveau mot de passe requis";
+    else if (next.length < 8) e.next = "8 caractères minimum";
+    if (!confirm) e.confirm = "Confirmation requise";
+    else if (next && confirm !== next) e.confirm = "Les mots de passe ne correspondent pas";
+    return e;
+  };
 
-  const onSubmit = handleSubmit(async (values) => {
-    setError(null);
-    if (values.new_password !== values.confirm) {
-      setError("Les mots de passe ne correspondent pas");
-      return;
-    }
-    if (values.new_password.length < 8) {
-      setError("8 caractères minimum");
-      return;
-    }
+  const onSubmit = async () => {
+    const e = validate();
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setSubmitting(true);
     try {
-      const res = await authApi.changePassword(values.current_password, values.new_password);
+      const res = await authApi.changePassword(current, next);
       toast.success(res.message ?? "Mot de passe modifié");
+      // Changing the password revokes every session, this one included.
       clear();
       queryClient.clear();
       navigate("/login", { replace: true });
     } catch (err) {
-      setError((err as Error).message);
+      setErrors({ form: (err as Error).message });
+    } finally {
+      setSubmitting(false);
     }
-  });
+  };
+
+  /** Typing in a field clears its own error and the server error. */
+  const edit =
+    (set: (v: string) => void, key: keyof Errors) =>
+    (v: string) => {
+      set(v);
+      setErrors((x) => ({ ...x, [key]: undefined, form: undefined }));
+    };
 
   return (
     <DashboardShell title="Mon profil" subtitle="Votre compte et votre mot de passe">
-      <div className="max-w-xl space-y-4">
-        <Card className="p-5">
-          <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
-            <div>
-              <p className="text-text-secondary">Nom</p>
-              <p className="font-medium text-text-primary">{user?.full_name}</p>
-            </div>
-            <div>
-              <p className="text-text-secondary">E-mail</p>
-              <p className="font-medium text-text-primary">{user?.email}</p>
-            </div>
-            <div>
-              <p className="text-text-secondary">Rôle</p>
-              <p className="mt-1">
-                <Badge tone={user?.role === "super_admin" ? "primary" : "info"}>
-                  {user && roleLabel[user.role]}
+      <div className="flex max-w-xl flex-col gap-4">
+        <Card>
+          <MetadataList columns="multi">
+            <MetadataListItem label="Nom">{user?.full_name}</MetadataListItem>
+            <MetadataListItem label="E-mail">{user?.email}</MetadataListItem>
+            <MetadataListItem label="Rôle">
+              {user && (
+                <Badge tone={user.role === "super_admin" ? "primary" : "info"}>
+                  {roleLabel[user.role]}
                 </Badge>
-              </p>
-            </div>
-          </div>
+              )}
+            </MetadataListItem>
+          </MetadataList>
         </Card>
 
-        <Card className="p-5">
-          <div className="mb-4 flex items-center gap-2">
-            <KeyRound className="h-5 w-5 text-primary" />
-            <h2 className="text-h3 font-semibold text-text-primary">Changer le mot de passe</h2>
-          </div>
-          <div className="mb-4 flex items-start gap-2 rounded-btn border border-info/30 bg-info/10 px-3 py-2 text-sm text-info">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>
-              Après le changement, toutes les sessions (y compris celle-ci) seront
-              révoquées — vous devrez vous reconnecter avec le nouveau mot de passe.
-            </p>
-          </div>
-          {error && (
-            <div className="mb-4 rounded-btn border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-              {error}
+        <Card>
+          <form
+            className="flex flex-col gap-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void onSubmit();
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-primary">
+                <Icon icon={KeyRound} size="md" />
+              </span>
+              <Heading level={2}>Changer le mot de passe</Heading>
             </div>
-          )}
-          <form onSubmit={onSubmit} className="space-y-4" noValidate>
-            <div>
-              <Label>Mot de passe actuel</Label>
-              <Input
-                type="password"
-                autoComplete="current-password"
-                {...register("current_password", { required: "Mot de passe actuel requis" })}
+
+            <Banner
+              status="info"
+              title="Vous devrez vous reconnecter"
+              description="Après le changement, toutes les sessions (y compris celle-ci) sont révoquées : reconnectez-vous avec le nouveau mot de passe."
+            />
+
+            {errors.form && <Banner status="error" title={errors.form} />}
+
+            <PasswordField
+              label="Mot de passe actuel"
+              autoComplete="current-password"
+              value={current}
+              onChange={edit(setCurrent, "current")}
+              error={errors.current}
+              isRequired
+            />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <PasswordField
+                label="Nouveau mot de passe"
+                autoComplete="new-password"
+                placeholder="8 caractères min."
+                value={next}
+                onChange={edit(setNext, "next")}
+                error={errors.next}
+                isRequired
               />
-              <FieldError message={formState.errors.current_password?.message as string | undefined} />
+              <PasswordField
+                label="Confirmation"
+                autoComplete="new-password"
+                value={confirm}
+                onChange={edit(setConfirm, "confirm")}
+                error={errors.confirm}
+                isRequired
+              />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Nouveau mot de passe</Label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder="8 caractères min."
-                  {...register("new_password", {
-                    required: "Nouveau mot de passe requis",
-                    minLength: { value: 8, message: "8 caractères minimum" },
-                  })}
-                />
-                <FieldError message={formState.errors.new_password?.message as string | undefined} />
-              </div>
-              <div>
-                <Label>Confirmation</Label>
-                <Input
-                  type="password"
-                  autoComplete="new-password"
-                  {...register("confirm", { required: "Confirmation requise" })}
-                />
-                <FieldError message={formState.errors.confirm?.message as string | undefined} />
-              </div>
+            <div>
+              <Button type="submit" loading={submitting}>
+                Modifier le mot de passe
+              </Button>
             </div>
-            <Button type="submit" loading={formState.isSubmitting}>
-              Modifier le mot de passe
-            </Button>
           </form>
         </Card>
       </div>

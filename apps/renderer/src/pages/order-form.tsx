@@ -1,29 +1,18 @@
 import { DateInput } from "@astryxdesign/core/DateInput";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Field } from "@astryxdesign/core/Field";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Plus,
-  Trash2,
-  Save,
-  CheckCircle,
-  Truck,
-  MapPin,
-  Calendar,
-  AlertCircle,
-} from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Save, CheckCircle } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
-import {
-  Button,
-  Input,
-  Select,
-  Card,
-  Label,
-  FieldError,
-  PhoneInput,
-  PageLoader,
-} from "@/components/ui";
+import { Button, Card, Modal, PhoneInput, PageLoader } from "@/components/ui";
 import { ordersApi, type CreateOrderItemInput } from "@/lib/api/orders.api";
 import { formatMillimes, type IsoDate } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -35,6 +24,25 @@ interface FormItem {
   quantity: number;
   unit_price_dt: string; // Dinars string with decimals
 }
+
+const ORDER_TYPE_OPTIONS = [
+  { value: "local", label: "Retrait au comptoir (Local)" },
+  { value: "online", label: "À livrer (En ligne)" },
+];
+
+/** Dinars text ("7,5" / "7.500") → number, the way the form has always read it. */
+const dinars = (s: string) => parseFloat(s.replace(",", ".") || "0");
+
+/** NumberInput at rest shows amounts like the rest of the app: "7,500". */
+const DT_FORMAT = new Intl.NumberFormat("fr-FR", {
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 3,
+});
+const formatDt = (v: number) => DT_FORMAT.format(v);
+
+/** Grid shared by the article header row and each line (sm and up). */
+const LINE_GRID =
+  "grid-cols-2 items-start gap-2 sm:grid-cols-[minmax(0,1fr)_96px_150px_120px_36px] sm:items-center sm:gap-3";
 
 export default function OrderFormPage() {
   const { id } = useParams<{ id: string }>();
@@ -201,131 +209,136 @@ export default function OrderFormPage() {
     );
   }
 
+  const typeLocked = isEdit && existingOrder?.status !== "pending";
+
   return (
     <DashboardShell
       title={isEdit ? `Modifier Commande ${existingOrder?.ticket_no || ""}` : "Nouvelle Commande"}
       subtitle="Saisie des articles, type de livraison et acompte"
+      actions={
+        <>
+          <Button
+            variant="secondary"
+            loading={saveMutation.isPending && !showConfirmModal}
+            onClick={() => saveMutation.mutate({ andConfirm: false })}
+          >
+            <Save className="h-4 w-4" />
+            <span>Enregistrer (Brouillon)</span>
+          </Button>
+          <Button
+            variant="primary"
+            disabled={validItems.length === 0}
+            title={validItems.length === 0 ? "Ajoutez au moins un article pour confirmer" : ""}
+            onClick={() => {
+              setShowConfirmModal(true);
+            }}
+          >
+            <CheckCircle className="h-4 w-4" />
+            <span>Confirmer la commande</span>
+          </Button>
+        </>
+      }
     >
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="max-w-5xl space-y-6">
+        <div>
           <Button
             variant="ghost"
+            size="sm"
             onClick={() => navigate(isEdit ? `/commandes/${id}` : "/commandes")}
-            className="gap-2 text-xs"
           >
             <ArrowLeft className="h-4 w-4" />
             <span>Retour</span>
           </Button>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              loading={saveMutation.isPending && !showConfirmModal}
-              onClick={() => saveMutation.mutate({ andConfirm: false })}
-            >
-              <Save className="h-4 w-4" />
-              <span>Enregistrer (Brouillon)</span>
-            </Button>
-            <Button
-              variant="primary"
-              disabled={validItems.length === 0}
-              title={validItems.length === 0 ? "Ajoutez au moins un article pour confirmer" : ""}
-              onClick={() => {
-                setShowConfirmModal(true);
-              }}
-            >
-              <CheckCircle className="h-4 w-4" />
-              <span>Confirmer la commande</span>
-            </Button>
-          </div>
         </div>
 
-        {error && <FieldError message={error} />}
+        {error && <Banner status="error" title={error} />}
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
           {/* Main Info */}
-          <Card className="p-5 md:col-span-2 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              1. Informations Client
-            </h2>
+          <Card className="space-y-4 p-5 md:col-span-2">
+            <Heading level={3} accessibilityLevel={2}>1. Informations client</Heading>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <Label>Nom du client</Label>
-                <Input
-                  placeholder="Ex: Foulen Ben Foulen"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label>Téléphone</Label>
+              <TextInput
+                label="Nom du client"
+                placeholder="Ex: Foulen Ben Foulen"
+                value={customerName}
+                onChange={setCustomerName}
+                autoComplete="off"
+                hasAutoFocus={!isEdit}
+                width="100%"
+              />
+              <Field
+                label="Téléphone"
+                inputID="order-customer-phone"
+                isGroupLabel
+                isOptional
+                width="100%"
+                status={
+                  phoneIncomplete
+                    ? { type: "error", message: "8 chiffres attendus : xx xxx xxx" }
+                    : undefined
+                }
+              >
                 <PhoneInput
                   value={customerPhone}
                   onChange={setCustomerPhone}
                   invalid={phoneIncomplete}
                 />
-                {phoneIncomplete && <FieldError message="8 chiffres attendus : xx xxx xxx" />}
-              </div>
+              </Field>
             </div>
 
-            <div>
-              <Label>Description / Détails de la demande</Label>
-              <Input
-                placeholder="Ex: Tirage de plans, reliure spirale, badge PVC..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
+            <TextInput
+              label="Description / Détails de la demande"
+              placeholder="Ex: Tirage de plans, reliure spirale, badge PVC..."
+              value={description}
+              onChange={setDescription}
+              width="100%"
+            />
           </Card>
 
           {/* Delivery & Due Date */}
-          <Card className="p-5 space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              2. Modalités
-            </h2>
+          <Card className="space-y-4 p-5">
+            <Heading level={3} accessibilityLevel={2}>2. Modalités</Heading>
 
-            <div>
-              <Label>Type de commande</Label>
-              <Select
-                value={orderType}
-                onChange={(e) => setOrderType(e.target.value as OrderType)}
-                disabled={isEdit && existingOrder?.status !== "pending"}
-              >
-                <option value="local">Retrait au comptoir (Local)</option>
-                <option value="online">À livrer (En ligne)</option>
-              </Select>
-            </div>
+            <Selector
+              label="Type de commande"
+              options={ORDER_TYPE_OPTIONS}
+              value={orderType}
+              onChange={(v) => v && setOrderType(v as OrderType)}
+              isDisabled={typeLocked}
+              disabledMessage="Le type ne peut être changé que pour une commande en attente"
+              width="100%"
+            />
 
             {orderType === "online" && (
               <>
-                <div>
-                  <Label>Adresse de livraison *</Label>
-                  <Input
-                    placeholder="Rue, Ville, Code postal..."
-                    value={deliveryAddress}
-                    onChange={(e) => setDeliveryAddress(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label>Frais de livraison (DT)</Label>
-                  <Input
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    placeholder="Ex: 7.000"
-                    value={deliveryFeeDt}
-                    onChange={(e) => setDeliveryFeeDt(e.target.value)}
-                  />
-                </div>
+                <TextInput
+                  label="Adresse de livraison"
+                  placeholder="Rue, Ville, Code postal..."
+                  value={deliveryAddress}
+                  onChange={setDeliveryAddress}
+                  isRequired
+                  width="100%"
+                />
+                <NumberInput
+                  label="Frais de livraison"
+                  placeholder="Ex: 7,000"
+                  value={dinars(deliveryFeeDt)}
+                  onChange={(v) => setDeliveryFeeDt(String(v))}
+                  min={0}
+                  isWheelEnabled={false}
+                  units="DT"
+                  formatValue={formatDt}
+                  width="100%"
+                />
               </>
             )}
 
             <DateInput
               label="Date promise (Livraison prévue)"
               value={(dueDate || undefined) as IsoDate | undefined}
-              onChange={(v) => setDueDate((v ?? ""))}
+              onChange={(v) => setDueDate(v ?? "")}
               format="date"
               hasClear
               width="100%"
@@ -334,168 +347,178 @@ export default function OrderFormPage() {
         </div>
 
         {/* Articles Editor */}
-        <Card className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              3. Articles & Tarifs
-            </h2>
-            <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={addItem}>
+        <Card className="space-y-4 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <Heading level={3} accessibilityLevel={2}>3. Articles & tarifs</Heading>
+            <Button variant="secondary" size="sm" onClick={addItem}>
               <Plus className="h-3.5 w-3.5" />
               <span>Ajouter un article</span>
             </Button>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-border text-xs uppercase text-text-secondary">
-                <tr>
-                  <th className="py-2 font-semibold">Libellé de l'article</th>
-                  <th className="w-24 py-2 font-semibold">Quantité</th>
-                  <th className="w-32 py-2 font-semibold">Prix unit. (DT)</th>
-                  <th className="w-32 py-2 text-right font-semibold">Total ligne</th>
-                  <th className="w-10 py-2"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50">
-                {items.map((item, index) => {
-                  const unitPrice = parseFloat(item.unit_price_dt.replace(",", ".") || "0");
-                  const lineTotal = item.quantity * Math.max(0, unitPrice);
-                  return (
-                    <tr key={item.id}>
-                      <td className="py-2.5 pr-3">
-                        <Input
-                          placeholder="Ex: Affiche A3, Impression quadri..."
-                          value={item.label}
-                          onChange={(e) => updateItem(index, { label: e.target.value })}
-                        />
-                      </td>
-                      <td className="py-2.5 pr-3">
-                        <Input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) =>
-                            updateItem(index, { quantity: parseInt(e.target.value) || 1 })
-                          }
-                        />
-                      </td>
-                      <td className="py-2.5 pr-3">
-                        <Input
-                          type="number"
-                          step="0.001"
-                          min="0"
-                          value={item.unit_price_dt}
-                          onChange={(e) => updateItem(index, { unit_price_dt: e.target.value })}
-                        />
-                      </td>
-                      <td className="py-2.5 text-right font-medium text-text-primary">
-                        {new Intl.NumberFormat("fr-FR", {
-                          minimumFractionDigits: 3,
-                          maximumFractionDigits: 3,
-                        }).format(lineTotal)}{" "}
-                        DT
-                      </td>
-                      <td className="py-2.5 text-right">
-                        {items.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeItem(index)}
-                            className="rounded p-1 text-text-secondary hover:text-danger"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Column names (the inputs carry hidden labels of their own). */}
+          <div
+            className={`${LINE_GRID} hidden border-b border-border pb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary sm:grid`}
+            aria-hidden
+          >
+            <span>Libellé de l'article</span>
+            <span>Quantité</span>
+            <span>Prix unit. (DT)</span>
+            <span className="text-right">Total ligne</span>
+            <span />
           </div>
 
+          <ul className="divide-y divide-border">
+            {items.map((item, index) => {
+              const unitPrice = dinars(item.unit_price_dt);
+              const lineTotal = item.quantity * Math.max(0, unitPrice);
+              const n = index + 1;
+              return (
+                <li key={item.id} className={`grid ${LINE_GRID} py-3 first:pt-0 sm:py-2.5`}>
+                  <div className="col-span-2 sm:col-span-1">
+                    <TextInput
+                      label={`Article ${n} : libellé`}
+                      isLabelHidden
+                      placeholder="Ex: Affiche A3, Impression quadri..."
+                      value={item.label}
+                      onChange={(v) => updateItem(index, { label: v })}
+                      width="100%"
+                    />
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-xs text-text-secondary sm:hidden" aria-hidden>
+                      Quantité
+                    </span>
+                    {/* TextInput, not NumberInput: totals must follow every keystroke. */}
+                    <TextInput
+                      label={`Article ${n} : quantité`}
+                      isLabelHidden
+                      inputMode="numeric"
+                      placeholder="1"
+                      value={item.quantity ? String(item.quantity) : ""}
+                      onChange={(v) => updateItem(index, { quantity: parseInt(v.replace(/\D/g, ""), 10) || 0 })}
+                      width="100%"
+                    />
+                  </div>
+                  <div>
+                    <span className="mb-1 block text-xs text-text-secondary sm:hidden" aria-hidden>
+                      Prix unitaire (DT)
+                    </span>
+                    <TextInput
+                      label={`Article ${n} : prix unitaire`}
+                      isLabelHidden
+                      inputMode="decimal"
+                      placeholder="0,000"
+                      value={item.unit_price_dt === "0" ? "" : item.unit_price_dt}
+                      onChange={(v) => updateItem(index, { unit_price_dt: v.replace(/[^\d.,]/g, "") || "0" })}
+                      width="100%"
+                    />
+                  </div>
+                  <div className="self-center text-sm font-medium tabular-nums text-text-primary sm:text-right">
+                    <span className="text-text-secondary sm:hidden">Total : </span>
+                    {formatDt(lineTotal)} DT
+                  </div>
+                  <div className="flex justify-end self-center">
+                    {items.length > 1 && (
+                      <IconButton
+                        label={`Supprimer l'article ${n}`}
+                        tooltip="Supprimer la ligne"
+                        icon={<Trash2 className="h-4 w-4" />}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeItem(index)}
+                      />
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
           {/* Totals Summary Footer */}
-          <div className="flex flex-col items-end gap-1.5 border-t border-border pt-4 text-sm">
-            <div className="flex w-64 justify-between text-text-secondary">
-              <span>Total Articles:</span>
-              <span className="font-medium text-text-primary">
-                {formatMillimes(totalArticlesMillimes)}
-              </span>
-            </div>
-            {orderType === "online" && (
-              <div className="flex w-64 justify-between text-text-secondary">
-                <span>Frais de livraison:</span>
-                <span className="font-medium text-text-primary">
-                  {formatMillimes(deliveryFeeMillimes)}
-                </span>
+          <div className="flex justify-end border-t border-border pt-4">
+            <dl className="w-full space-y-1.5 text-sm sm:w-72">
+              <div className="flex justify-between text-text-secondary">
+                <dt>
+                  Total articles
+                  {validItems.length > 0 && ` (${validItems.length})`}
+                </dt>
+                <dd className="font-medium tabular-nums text-text-primary">
+                  {formatMillimes(totalArticlesMillimes)}
+                </dd>
               </div>
-            )}
-            <div className="flex w-64 justify-between border-t border-border/60 pt-2 text-base font-bold text-text-primary">
-              <span>Grand Total:</span>
-              <span className="text-primary">{formatMillimes(grandTotalMillimes)}</span>
-            </div>
+              {orderType === "online" && (
+                <div className="flex justify-between text-text-secondary">
+                  <dt>Frais de livraison</dt>
+                  <dd className="font-medium tabular-nums text-text-primary">
+                    {formatMillimes(deliveryFeeMillimes)}
+                  </dd>
+                </div>
+              )}
+              <div className="flex items-baseline justify-between border-t border-border pt-2 text-base font-bold text-text-primary">
+                <dt>Total à payer</dt>
+                <dd className="tabular-nums text-primary">{formatMillimes(grandTotalMillimes)}</dd>
+              </div>
+            </dl>
           </div>
         </Card>
       </div>
 
       {/* Confirmation & Advance Dialog */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setShowConfirmModal(false)}
+      <Modal
+        open={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        title="Confirmer la commande"
+        width="max-w-md"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setShowConfirmModal(false)}
+              disabled={saveMutation.isPending}
+            >
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              loading={saveMutation.isPending}
+              onClick={() => {
+                setShowConfirmModal(false);
+                saveMutation.mutate({ andConfirm: true });
+              }}
+            >
+              Confirmer
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Text type="supporting" color="secondary" display="block">
+            La commande passera en statut <strong>Confirmée</strong>. Vous pouvez enregistrer une
+            avance maintenant (optionnel).
+          </Text>
+          <NumberInput
+            label="Montant de l'avance (acompte)"
+            isOptional
+            placeholder="0,000"
+            value={confirmAdvanceDt ? dinars(confirmAdvanceDt) : null}
+            onChange={(v) => setConfirmAdvanceDt(v == null ? "" : String(v))}
+            hasClear
+            min={0}
+            isWheelEnabled={false}
+            units="DT"
+            formatValue={formatDt}
+            hasAutoFocus
+            width="100%"
           />
-          <div className="relative z-10 w-full max-w-md rounded-modal border border-border bg-surface p-6 shadow-hover">
-            <h2 className="text-h3 font-semibold text-text-primary">
-              Confirmer la commande
-            </h2>
-            <p className="mt-2 text-xs text-text-secondary">
-              La commande passera en statut <strong>Confirmée</strong>. Vous pouvez enregistrer
-              une avance maintenant (optionnel).
-            </p>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <Label>Montant de l'avance (Acompte en DT)</Label>
-                <Input
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  placeholder="0.000"
-                  value={confirmAdvanceDt}
-                  onChange={(e) => setConfirmAdvanceDt(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="rounded-card bg-surface-2 p-3 text-xs text-text-secondary space-y-1">
-                <div className="flex justify-between">
-                  <span>Montant total:</span>
-                  <span className="font-bold text-text-primary">{formatMillimes(grandTotalMillimes)}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
-              <Button
-                variant="secondary"
-                onClick={() => setShowConfirmModal(false)}
-                disabled={saveMutation.isPending}
-              >
-                Annuler
-              </Button>
-              <Button
-                variant="primary"
-                loading={saveMutation.isPending}
-                onClick={() => {
-                  setShowConfirmModal(false);
-                  saveMutation.mutate({ andConfirm: true });
-                }}
-              >
-                Confirmer
-              </Button>
-            </div>
+          <div className="flex justify-between rounded-card bg-surface-2 p-3 text-sm text-text-secondary">
+            <span>Montant total</span>
+            <span className="font-bold tabular-nums text-text-primary">
+              {formatMillimes(grandTotalMillimes)}
+            </span>
           </div>
         </div>
-      )}
+      </Modal>
     </DashboardShell>
   );
 }

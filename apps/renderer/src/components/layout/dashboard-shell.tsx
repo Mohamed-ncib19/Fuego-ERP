@@ -153,7 +153,7 @@ export function DashboardShell({
               </Text>
             )}
           </div>
-          {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+          {actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
         </header>
         {inSettings && isAdmin && <SettingsTabs />}
         <div className="min-w-0 flex-1">{children}</div>
